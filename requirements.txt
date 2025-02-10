@@ -1,0 +1,23 @@
+fastapi==0.104.1
+uvicorn==0.24.0
+python-multipart==0.0.6
+transformers==4.35.2
+torch==2.1.1
+torchaudio==2.1.1
+numpy==1.26.2
+pydantic==2.5.2
+pydantic-settings==2.1.0
+python-dotenv==1.0.0
+gunicorn==21.2.0
+soundfile==0.12.1
+inflect>=7.5.0
+kanjize>=1.5.0
+phonemizer>=3.3.0
+sudachidict-full>=20241021
+sudachipy>=0.6.10
+huggingface-hub>=0.28.1
+
+# Optional compile dependencies
+flash-attn>=2.7.3
+mamba-ssm>=2.2.4
+causal-conv1d>=1.5.0.post8 
