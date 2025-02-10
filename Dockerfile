@@ -21,7 +21,7 @@ COPY . .
 RUN git submodule update --init --recursive --remote
 
 # Install dependencies with optimizations
-RUN uv pip install --no-build-isolation -e .[compile] && \
+RUN uv pip install --system --no-build-isolation -e .[compile] && \
     # Install flash-attention and other optimizations
     pip install --no-build-isolation \
     flash-attn \
