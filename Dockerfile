@@ -16,10 +16,9 @@ RUN pip install -U uv
 
 # Copy application code and submodules
 COPY . .
-RUN git submodule update --init --recursive --remote
 
-# Install Zonos from submodule
-RUN cd Zonos && pip install -e . && pip install -r requirements.txt
+# Initialize and update submodules
+RUN git submodule update --init --recursive --remote
 
 # Install dependencies with optimizations
 RUN uv pip install --no-build-isolation -e .[compile] && \
