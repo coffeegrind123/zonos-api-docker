@@ -17,7 +17,8 @@ sudachidict-full>=20241021
 sudachipy>=0.6.10
 huggingface-hub>=0.28.1
 
-# Optional compile dependencies
-flash-attn>=2.7.3
+# Optional dependencies - requires CUDA
+# Uncomment if you have CUDA installed and want to use GPU acceleration
+# flash-attn>=2.7.3
 mamba-ssm>=2.2.4
 causal-conv1d>=1.5.0.post8 

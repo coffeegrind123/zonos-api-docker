@@ -37,7 +37,7 @@ For more information, visit the model cards on Hugging Face: [Hybrid](https://hu
 ### Using Docker Compose (Recommended)
 ```bash
 # Clone the repository with submodules
-git clone --recursive <your-repo-url>
+git clone --recursive https://github.com/manascb1344/zonos-api
 cd zonos-api
 
 # Or if you already cloned without --recursive:
@@ -61,7 +61,7 @@ docker-compose up -d --build
 
 1. Clone the repository with submodules:
 ```bash
-git clone --recursive <your-repo-url>
+git clone --recursive https://github.com/manascb1344/zonos-api
 cd zonos-api
 ```
 

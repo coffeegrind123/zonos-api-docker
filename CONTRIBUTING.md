@@ -14,7 +14,7 @@ This project uses git submodules to manage the Zonos model repository. When work
 
 1. Clone with submodules:
 ```bash
-git clone --recursive <your-repo-url>
+git clone --recursive https://github.com/manascb1344/zonos-api
 ```
 
 2. If you forgot --recursive:
@@ -41,7 +41,7 @@ git commit -m "chore: update Zonos submodule to <version>"
 1. Clone the repository and set up your environment:
 ```bash
 # Clone the repo with submodules
-git clone --recursive <your-repo-url>
+git clone --recursive https://github.com/manascb1344/zonos-api
 cd zonos-api
 
 # Create and activate virtual environment
