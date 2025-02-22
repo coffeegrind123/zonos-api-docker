@@ -1,60 +1,35 @@
-FROM pytorch/pytorch:2.6.0-cuda12.4-cudnn9-devel
+FROM nvidia/cuda:12.1.0-base-ubuntu22.04
 
+# Set working directory
 WORKDIR /app
 
 # Install system dependencies
 RUN apt-get update && apt-get install -y \
-    build-essential \
+    python3.10 \
+    python3-pip \
+    ffmpeg \
     libsndfile1 \
-    espeak-ng \
-    curl \
-    git \
     && rm -rf /var/lib/apt/lists/*
 
-# Install uv
-RUN pip install -U uv
+# Install Python dependencies
+COPY requirements.txt .
+RUN pip3 install --no-cache-dir -r requirements.txt
 
-# Copy application code and submodules
-COPY . .
+# Install specific wheel files with GPU support
+RUN pip3 install flash-attn --no-build-isolation --no-deps \
+    && FLASH_ATTENTION_SKIP_CUDA_BUILD=TRUE pip3 install flash-attn --no-build-isolation
 
-# Initialize and update submodules
-RUN git submodule update --init --recursive --remote
+RUN pip3 install https://github.com/state-spaces/mamba/releases/download/v2.2.4/mamba_ssm-2.2.4+cu12torch2.4cxx11abiFALSE-cp310-cp310-linux_x86_64.whl
 
-# Install dependencies with optimizations
-RUN uv pip install --system --no-build-isolation -e .[compile] && \
-    # Install flash-attention and other optimizations
-    pip install --no-build-isolation \
-    flash-attn \
-    mamba-ssm \
-    causal-conv1d
+RUN pip3 install https://github.com/Dao-AILab/causal-conv1d/releases/download/v1.5.0.post8/causal_conv1d-1.5.0.post8+cu12torch2.4cxx11abiFALSE-cp310-cp310-linux_x86_64.whl
 
-# Create a non-root user and setup directories
-RUN useradd -m -u 1000 appuser && \
-    mkdir -p /home/appuser/.cache/huggingface && \
-    chown -R appuser:appuser /home/appuser/.cache && \
-    mkdir -p /app/uploads && \
-    chown -R appuser:appuser /app
+# Copy application code
+COPY app app/
+COPY pyproject.toml .
 
-USER appuser
+# Environment variables
+ENV PYTHONPATH=/app
+ENV USE_GPU=true
 
-# Set environment variables
-ENV PORT=8000
-ENV WORKERS=4
-ENV MODEL_TYPE="Transformer"
-ENV MODEL_CACHE_DIR="/home/appuser/.cache/huggingface"
-ENV PYTHONUNBUFFERED=1
-# CUDA optimization settings
-ENV CUDA_LAUNCH_BLOCKING=0
-ENV TORCH_CUDA_ARCH_LIST="7.0;7.5;8.0;8.6+PTX"
-ENV CUDA_HOME="/usr/local/cuda"
-ENV MAX_JOBS=4
-
-# Expose the port
-EXPOSE $PORT
-
-# Add healthcheck
-HEALTHCHECK --interval=30s --timeout=10s --start-period=40s --retries=3 \
-    CMD curl -f http://localhost:$PORT/health || exit 1
-
-# Run the application with Gunicorn
-CMD ["sh", "-c", "gunicorn main:app --workers $WORKERS --worker-class uvicorn.workers.UvicornWorker --bind 0.0.0.0:$PORT --timeout 300 --worker-tmp-dir /dev/shm"]
+# Run the application
+CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000"]
