@@ -1,17 +1,16 @@
 # Runtime dependencies
-torch==2.4.0
-torchaudio==2.4.0
-fastapi==0.109.2
-uvicorn==0.27.1
-python-multipart==0.0.6
-numpy>=1.24.0
-soundfile>=0.12.1
-gradio>=4.16.0
-pydantic>=2.6.1
-zonos @ git+https://github.com/Zyphra/Zonos.git
+torch
+torchaudio
+fastapi
+uvicorn
+python-multipart
+numpy
+soundfile
+gradio
+pydantic
 
 # Test dependencies
-pytest>=7.4.4
-pytest-cov>=4.1.0
-httpx>=0.26.0
-pytest-asyncio>=0.23.5
+pytest
+pytest-cov
+httpx
+pytest-asyncio

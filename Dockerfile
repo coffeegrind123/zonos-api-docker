@@ -16,6 +16,10 @@ RUN apt-get update && apt-get install -y \
 COPY requirements.txt .
 RUN pip3 install --no-cache-dir -r requirements.txt
 
+# Clone the zonos repository and install it
+RUN git clone https://github.com/Zyphra/Zonos.git /app/zonos && \
+    pip3 install -e /app/zonos
+
 # Install specific wheel files with GPU support
 RUN pip3 install flash-attn --no-build-isolation --no-deps \
     && FLASH_ATTENTION_SKIP_CUDA_BUILD=TRUE pip3 install flash-attn --no-build-isolation
