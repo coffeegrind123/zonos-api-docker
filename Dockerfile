@@ -21,15 +21,12 @@ RUN git clone https://github.com/Zyphra/Zonos.git /app/zonos && \
     pip3 install /app/zonos
 
 # Install specific wheel files with GPU support
-RUN pip3 install flash-attn --no-build-isolation --no-deps \
-    && FLASH_ATTENTION_SKIP_CUDA_BUILD=TRUE pip3 install flash-attn --no-build-isolation
-
-RUN pip3 install https://github.com/state-spaces/mamba/releases/download/v2.2.4/mamba_ssm-2.2.4+cu12torch2.4cxx11abiFALSE-cp310-cp310-linux_x86_64.whl
-
-RUN pip3 install https://github.com/Dao-AILab/causal-conv1d/releases/download/v1.5.0.post8/causal_conv1d-1.5.0.post8+cu12torch2.4cxx11abiFALSE-cp310-cp310-linux_x86_64.whl
+RUN FLASH_ATTENTION_SKIP_CUDA_BUILD=TRUE pip3 install flash-attn --no-build-isolation \
+    && pip3 install --no-cache-dir https://github.com/state-spaces/mamba/releases/download/v2.2.4/mamba_ssm-2.2.4+cu12torch2.4cxx11abiFALSE-cp310-cp310-linux_x86_64.whl \
+    && pip3 install --no-cache-dir https://github.com/Dao-AILab/causal-conv1d/releases/download/v1.5.0.post8/causal_conv1d-1.5.0.post8+cu12torch2.4cxx11abiFALSE-cp310-cp310-linux_x86_64.whl
 
 # Copy application code
-COPY app app/
+COPY app/ app/
 COPY pyproject.toml .
 
 # Environment variables

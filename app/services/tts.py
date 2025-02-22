@@ -135,7 +135,7 @@ class TTSService:
 
         # Generate audio
         logger.info("Generating audio")
-        max_new_tokens = 86 * 30  # ~30 seconds of audio
+        max_new_tokens = 86 * 60  # ~30 seconds of audio
         codes = selected_model.generate(
             prefix_conditioning=conditioning,
             audio_prefix_codes=audio_prefix_codes,
