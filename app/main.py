@@ -84,11 +84,11 @@ async def synthesize_speech(request: TTSRequest):
             seed=request.seed,
             randomize_seed=request.randomize_seed,
             unconditional_keys=request.unconditional_keys,
-            top_p=0.95,
-            top_k=50,
-            linear=1.0,
-            confidence=0.1,
-            quadratic=1.0,
+            top_p=request.top_p,
+            top_k=request.top_k,
+            linear=request.linear,
+            confidence=request.confidence,
+            quadratic=request.quadratic,
         )
 
         # Convert to WAV format

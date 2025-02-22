@@ -1,4 +1,4 @@
-from typing import List, Optional, Dict, Any, Tuple
+from typing import List, Optional
 from pydantic import BaseModel, Field
 
 class TTSRequest(BaseModel):
@@ -19,12 +19,17 @@ class TTSRequest(BaseModel):
     speaker_noised: bool = Field(default=False, description="Whether to denoise speaker audio")
     cfg_scale: float = Field(default=2.0, description="CFG scale value")
     min_p: float = Field(default=0.15, description="Minimum probability")
-    seed: Optional[int] = Field(default=420, description="Random seed")
+    seed: int = Field(default=420, description="Random seed")
     randomize_seed: bool = Field(default=True, description="Whether to randomize seed")
     unconditional_keys: List[str] = Field(
         default=["emotion"],
         description="List of conditioning keys to make unconditional"
     )
+    top_p: float = Field(default=0.95, description="Top-p sampling value")
+    top_k: int = Field(default=50, description="Top-k sampling value") 
+    linear: float = Field(default=1.0, description="Linear scaling factor")
+    confidence: float = Field(default=0.1, description="Confidence scaling factor")
+    quadratic: float = Field(default=1.0, description="Quadratic scaling factor")
 
 class AudioResponse(BaseModel):
     sample_rate: int
