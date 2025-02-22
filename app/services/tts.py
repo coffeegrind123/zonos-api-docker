@@ -1,31 +1,42 @@
 import torch
 import torchaudio
+import logging
 from typing import List, Tuple, Optional, Dict, Any
 import numpy as np
 from zonos.model import Zonos
 from zonos.conditioning import make_cond_dict, supported_language_codes
 
+# Configure logging
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
+
 class TTSService:
     def __init__(self, device: str = "cuda"):
         self.device = device
-        self.model_names = ["Zyphra/Zonos-v0.1-transformer", "Zyphra/Zonos-v0.1-hybrid"]
+        self.model_names = ["Zyphra/Zonos-v0.1-transformer"]
         self.models = {
-            name: Zonos.from_pretrained(name, device=device) 
+            name: Zonos.from_pretrained(name, device=device, backbone="torch") 
             for name in self.model_names
         }
         
+        # Debugging: Print loaded models
+        print(f"Loaded models: {self.models.keys()}")
+
         # Set models to eval mode
         for model in self.models.values():
             model.requires_grad_(False).eval()
 
     def get_model_names(self) -> List[str]:
+        logger.info("Retrieving model names")
         return self.model_names
 
     def get_supported_languages(self) -> List[str]:
+        logger.info("Retrieving supported languages")
         return supported_language_codes
 
     def get_model_conditioners(self, model_choice: str) -> List[str]:
         """Get list of conditioner names for a model"""
+        logger.info(f"Retrieving conditioners for model: {model_choice}")
         model = self.models[model_choice]
         return [c.name for c in model.prefix_conditioner.conditioners]
 
@@ -33,31 +44,32 @@ class TTSService:
         self,
         model_choice: str,
         text: str,
-        language: str,
-        speaker_audio: Optional[str],
-        prefix_audio: Optional[str],
-        emotion_values: List[float],
-        vq_score: float,
-        fmax: float,
-        pitch_std: float,
-        speaking_rate: float,
-        dnsmos_ovrl: float,
-        speaker_noised: bool,
-        cfg_scale: float,
-        top_p: float,
-        top_k: int,
-        min_p: float,
-        linear: float,
-        confidence: float,
-        quadratic: float,
-        seed: int,
-        randomize_seed: bool,
-        unconditional_keys: List[str],
+        language: str = "en-us",
+        speaker_audio: Optional[str] = None,
+        prefix_audio: Optional[str] = None,
+        emotion_values: List[float] = [1.0, 0.05, 0.05, 0.05, 0.05, 0.05, 0.1, 0.2],
+        vq_score: float = 0.78,
+        fmax: float = 24000,
+        pitch_std: float = 45.0,
+        speaking_rate: float = 15.0,
+        dnsmos_ovrl: float = 4.0,
+        speaker_noised: bool = False,
+        cfg_scale: float = 2.0,
+        min_p: float = 0.15,
+        seed: int = 420,
+        randomize_seed: bool = True,
+        unconditional_keys: List[str] = ["emotion"],
+        top_p: float = 0.95,
+        top_k: int = 50,
+        linear: float = 1.0,
+        confidence: float = 0.1,
+        quadratic: float = 1.0,
     ) -> Tuple[Tuple[int, np.ndarray], int]:
         """
         Generate audio using the specified model and parameters.
         Returns a tuple of ((sample_rate, audio_data), seed).
         """
+        logger.info(f"Generating audio for model: {model_choice}")
         selected_model = self.models[model_choice]
 
         if randomize_seed:
@@ -67,6 +79,7 @@ class TTSService:
         # Process speaker audio if provided
         speaker_embedding = None
         if speaker_audio is not None and "speaker" not in unconditional_keys:
+            logger.info(f"Processing speaker audio: {speaker_audio}")
             wav, sr = torchaudio.load(speaker_audio)
             speaker_embedding = selected_model.make_speaker_embedding(wav, sr)
             speaker_embedding = speaker_embedding.to(self.device, dtype=torch.bfloat16)
@@ -74,6 +87,7 @@ class TTSService:
         # Process prefix audio if provided
         audio_prefix_codes = None
         if prefix_audio is not None:
+            logger.info(f"Processing prefix audio: {prefix_audio}")
             wav_prefix, sr_prefix = torchaudio.load(prefix_audio)
             wav_prefix = wav_prefix.mean(0, keepdim=True)
             wav_prefix = torchaudio.functional.resample(
@@ -92,6 +106,7 @@ class TTSService:
         vq_tensor = torch.tensor([vq_score] * 8, device=self.device).unsqueeze(0)
 
         # Create conditioning dictionary
+        logger.info("Creating conditioning dictionary")
         cond_dict = make_cond_dict(
             text=text,
             language=language,
@@ -119,6 +134,7 @@ class TTSService:
         }
 
         # Generate audio
+        logger.info("Generating audio")
         max_new_tokens = 86 * 30  # ~30 seconds of audio
         codes = selected_model.generate(
             prefix_conditioning=conditioning,
@@ -130,9 +146,11 @@ class TTSService:
         )
 
         # Decode generated codes to waveform
+        logger.info("Decoding generated audio to waveform")
         wav_out = selected_model.autoencoder.decode(codes).cpu().detach()
         sr_out = selected_model.autoencoder.sampling_rate
         if wav_out.dim() == 2 and wav_out.size(0) > 1:
             wav_out = wav_out[0:1, :]
 
+        logger.info("Audio generation complete")
         return (sr_out, wav_out.squeeze().numpy()), seed

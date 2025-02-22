@@ -43,10 +43,12 @@ async def get_languages():
     service = get_tts_service()
     return {"languages": service.get_supported_languages()}
 
-@app.get("/model/{model_name}/conditioners")
+@app.get("/model/conditioners")
 async def get_model_conditioners(model_name: str):
     """Get available conditioners for a specific model."""
     service = get_tts_service()
+    print(f"Requested model: {model_name}")  # Debugging line
+    print(f"Available models: {service.get_model_names()}")  # Debugging line
     if model_name not in service.get_model_names():
         raise HTTPException(status_code=404, detail="Model not found")
     return {"conditioners": service.get_model_conditioners(model_name)}
@@ -82,6 +84,11 @@ async def synthesize_speech(request: TTSRequest):
             seed=request.seed,
             randomize_seed=request.randomize_seed,
             unconditional_keys=request.unconditional_keys,
+            top_p=0.95,
+            top_k=50,
+            linear=1.0,
+            confidence=0.1,
+            quadratic=1.0,
         )
 
         # Convert to WAV format
