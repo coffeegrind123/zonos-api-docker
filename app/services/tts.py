@@ -44,7 +44,12 @@ class TTSService:
         dnsmos_ovrl: float,
         speaker_noised: bool,
         cfg_scale: float,
+        top_p: float,
+        top_k: int,
         min_p: float,
+        linear: float,
+        confidence: float,
+        quadratic: float,
         seed: int,
         randomize_seed: bool,
         unconditional_keys: List[str],
@@ -103,6 +108,16 @@ class TTSService:
         )
         conditioning = selected_model.prepare_conditioning(cond_dict)
 
+        # sampling parameters
+        sampling_params = {
+            "top_p": float(top_p),
+            "top_k": int(top_k),
+            "min_p": float(min_p),
+            "linear": float(linear),
+            "conf": float(confidence),
+            "quad": float(quadratic)
+        }
+
         # Generate audio
         max_new_tokens = 86 * 30  # ~30 seconds of audio
         codes = selected_model.generate(
@@ -111,7 +126,7 @@ class TTSService:
             max_new_tokens=max_new_tokens,
             cfg_scale=float(cfg_scale),
             batch_size=1,
-            sampling_params=dict(min_p=float(min_p)),
+            sampling_params=sampling_params,
         )
 
         # Decode generated codes to waveform
