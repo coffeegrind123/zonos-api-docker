@@ -10,15 +10,21 @@ RUN apt-get update && apt-get install -y \
     ffmpeg \
     libsndfile1 \
     git \
+    espeak-ng \
     && rm -rf /var/lib/apt/lists/*
 
 # Install Python dependencies
 COPY requirements.txt .
 RUN pip3 install --no-cache-dir -r requirements.txt
 
-# Clone the zonos repository and install it
-RUN git clone https://github.com/Zyphra/Zonos.git /app/zonos && \
-    pip3 install /app/zonos
+# Clone the zonos repository and update submodules
+RUN git clone https://github.com/Zyphra/Zonos.git /app/zonos \
+    && cd /app/zonos \
+    && git submodule update --init --recursive \
+    && cd ..
+
+# Install Zonos in editable mode
+RUN pip3 install -e /app/zonos
 
 # Install specific wheel files with GPU support
 RUN FLASH_ATTENTION_SKIP_CUDA_BUILD=TRUE pip3 install flash-attn --no-build-isolation \
@@ -30,7 +36,7 @@ COPY app/ app/
 COPY pyproject.toml .
 
 # Environment variables
-ENV PYTHONPATH=/app
+ENV PYTHONPATH=/app:/app/zonos
 ENV USE_GPU=true
 
 # Run the application
