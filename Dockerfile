@@ -4,7 +4,9 @@ FROM nvidia/cuda:12.1.0-base-ubuntu22.04
 WORKDIR /app
 
 # Install system dependencies
-RUN apt-get update && apt-get install -y \
+RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
+    --mount=type=cache,target=/var/lib/apt,sharing=locked \
+    apt-get update && apt-get install -y \
     python3.10 \
     python3-pip \
     ffmpeg \
@@ -13,9 +15,12 @@ RUN apt-get update && apt-get install -y \
     espeak-ng \
     && rm -rf /var/lib/apt/lists/*
 
-# Install Python dependencies
-COPY requirements.txt .
-RUN pip3 install --no-cache-dir -r requirements.txt
+# Copy dependency files first
+COPY requirements.txt pyproject.toml ./
+
+# Install Python dependencies with caching
+RUN --mount=type=cache,target=/root/.cache/pip \
+    pip3 install --no-cache-dir -r requirements.txt
 
 # Clone the zonos repository and update submodules
 RUN git clone https://github.com/Zyphra/Zonos.git /app/zonos \
@@ -31,12 +36,14 @@ RUN pip3 install /app/zonos \
     sudachidict-full>=20241021 \
     sudachipy>=0.6.10
 
-# Install specific wheel files with GPU support
-RUN FLASH_ATTENTION_SKIP_CUDA_BUILD=TRUE pip3 install flash-attn --no-build-isolation \
-    && pip3 install --no-cache-dir https://github.com/state-spaces/mamba/releases/download/v2.2.4/mamba_ssm-2.2.4+cu12torch2.4cxx11abiFALSE-cp310-cp310-linux_x86_64.whl \
-    && pip3 install --no-cache-dir https://github.com/Dao-AILab/causal-conv1d/releases/download/v1.5.0.post8/causal_conv1d-1.5.0.post8+cu12torch2.4cxx11abiFALSE-cp310-cp310-linux_x86_64.whl
+# Install GPU dependencies with caching
+RUN --mount=type=cache,target=/root/.cache/pip \
+    FLASH_ATTENTION_SKIP_CUDA_BUILD=TRUE pip3 install flash-attn --no-build-isolation \
+    && pip3 install --no-cache-dir \
+       https://github.com/state-spaces/mamba/releases/download/v2.2.4/mamba_ssm-2.2.4+cu12torch2.4cxx11abiFALSE-cp310-cp310-linux_x86_64.whl \
+       https://github.com/Dao-AILab/causal-conv1d/releases/download/v1.5.0.post8/causal_conv1d-1.5.0.post8+cu12torch2.4cxx11abiFALSE-cp310-cp310-linux_x86_64.whl
 
-# Copy application code
+# Copy application code last (changes most frequently)
 COPY app/ app/
 COPY pyproject.toml .
 
