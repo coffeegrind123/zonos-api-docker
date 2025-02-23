@@ -3,19 +3,20 @@ FROM pytorch/pytorch:2.1.0-cuda12.1-cudnn8-devel
 # Set working directory
 WORKDIR /app
 
-# Install system dependencies
+# Install system dependencies with cleanup
 RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
     --mount=type=cache,target=/var/lib/apt,sharing=locked \
-    apt-get update && DEBIAN_FRONTEND=noninteractive apt-get install -y \
+    apt-get update && DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
     ffmpeg \
     libsndfile1 \
     git \
     espeak-ng \
+    && apt-get clean \
     && rm -rf /var/lib/apt/lists/*
 
 # Install uv package manager
 RUN --mount=type=cache,target=/root/.cache/pip \
-    pip3 install uv
+    pip3 install --no-cache-dir uv
 
 # Copy dependency files first
 COPY requirements.txt pyproject.toml ./
@@ -25,8 +26,8 @@ RUN --mount=type=cache,target=/root/.cache/pip \
     uv pip install --system -r requirements.txt \
     && rm -rf /root/.cache/pip/*
 
-# Clone Zonos repository
-RUN git clone https://github.com/Zyphra/Zonos.git /app/zonos \
+# Clone Zonos repository with minimal depth
+RUN git clone --depth 1 https://github.com/Zyphra/Zonos.git /app/zonos \
     && cd /app/zonos \
     && git submodule update --init --recursive
 
@@ -62,12 +63,13 @@ RUN --mount=type=cache,target=/root/.cache/pip \
     uv pip install --system --no-build-isolation causal-conv1d==1.5.0.post8 \
     && rm -rf /root/.cache/pip/*
 
-# Copy application code last (changes most frequently)
+# Copy application code last
 COPY app/ app/
 
 # Environment variables
-ENV PYTHONPATH=/app:/app/zonos
-ENV USE_GPU=true
+ENV PYTHONPATH=/app:/app/zonos \
+    USE_GPU=true \
+    PYTHONUNBUFFERED=1
 
 # Run the application
 CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000"]
