@@ -31,18 +31,16 @@ RUN --mount=type=cache,target=/root/.cache/pip \
     && git submodule update --init --recursive \
     && uv pip install --system -e . \
     && uv pip install --system \
-       kanjize>=1.5.0 \
-       inflect>=7.5.0 \
-       phonemizer>=3.3.0 \
-       sudachidict-full>=20241021 \
-       sudachipy>=0.6.10
+    kanjize>=1.5.0 \
+    inflect>=7.5.0 \
+    phonemizer>=3.3.0 \
+    sudachidict-full>=20241021 \
+    sudachipy>=0.6.10
 
 # Install GPU dependencies with caching
 RUN --mount=type=cache,target=/root/.cache/pip \
     FLASH_ATTENTION_SKIP_CUDA_BUILD=TRUE uv pip install --system flash-attn --no-build-isolation \
-    && uv pip install --system \
-       https://github.com/state-spaces/mamba/releases/download/v2.2.4/mamba_ssm-2.2.4+cu121torch2.1cxx11abiFALSE-cp310-cp310-linux_x86_64.whl \
-       https://github.com/Dao-AILab/causal-conv1d/releases/download/v1.5.0.post8/causal_conv1d-1.5.0.post8+cu121torch2.1cxx11abiFALSE-cp310-cp310-linux_x86_64.whl
+    && uv pip install --system --no-build-isolation mamba-ssm==2.2.4 causal-conv1d==1.5.0.post8
 
 # Copy application code last (changes most frequently)
 COPY app/ app/
