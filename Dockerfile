@@ -35,8 +35,8 @@ RUN uv pip install --system -e /app/zonos \
 
 # Install GPU dependencies with caching
 RUN --mount=type=cache,target=/root/.cache/pip \
-    FLASH_ATTENTION_SKIP_CUDA_BUILD=TRUE uv pip install --system flash-attn --no-build-isolation \
-    && pip install --system \
+    FLASH_ATTENTION_SKIP_CUDA_BUILD=TRUE pip install flash-attn --no-build-isolation \
+    && pip install \
        https://github.com/state-spaces/mamba/releases/download/v2.2.4/mamba_ssm-2.2.4+cu12torch2.4cxx11abiFALSE-cp310-cp310-linux_x86_64.whl \
        https://github.com/Dao-AILab/causal-conv1d/releases/download/v1.5.0.post8/causal_conv1d-1.5.0.post8+cu12torch2.4cxx11abiFALSE-cp310-cp310-linux_x86_64.whl
 
