@@ -20,27 +20,47 @@ RUN --mount=type=cache,target=/root/.cache/pip \
 # Copy dependency files first
 COPY requirements.txt pyproject.toml ./
 
-# Install Python dependencies with caching
+# Install Python dependencies with caching in smaller chunks
 RUN --mount=type=cache,target=/root/.cache/pip \
-    uv pip install --system -r requirements.txt
+    uv pip install --system -r requirements.txt \
+    && rm -rf /root/.cache/pip/*
 
-# Clone and install Zonos with caching
-RUN --mount=type=cache,target=/root/.cache/pip \
-    git clone https://github.com/Zyphra/Zonos.git /app/zonos \
+# Clone Zonos repository
+RUN git clone https://github.com/Zyphra/Zonos.git /app/zonos \
     && cd /app/zonos \
-    && git submodule update --init --recursive \
+    && git submodule update --init --recursive
+
+# Install Zonos and its dependencies in smaller chunks
+RUN --mount=type=cache,target=/root/.cache/pip \
+    cd /app/zonos \
     && uv pip install --system -e . \
-    && uv pip install --system \
+    && rm -rf /root/.cache/pip/*
+
+RUN --mount=type=cache,target=/root/.cache/pip \
+    uv pip install --system \
     kanjize>=1.5.0 \
     inflect>=7.5.0 \
+    && rm -rf /root/.cache/pip/*
+
+RUN --mount=type=cache,target=/root/.cache/pip \
+    uv pip install --system \
     phonemizer>=3.3.0 \
     sudachidict-full>=20241021 \
-    sudachipy>=0.6.10
+    sudachipy>=0.6.10 \
+    && rm -rf /root/.cache/pip/*
 
-# Install GPU dependencies with caching
+# Install GPU dependencies with caching in separate steps
 RUN --mount=type=cache,target=/root/.cache/pip \
     FLASH_ATTENTION_SKIP_CUDA_BUILD=TRUE uv pip install --system flash-attn --no-build-isolation \
-    && uv pip install --system --no-build-isolation mamba-ssm==2.2.4 causal-conv1d==1.5.0.post8
+    && rm -rf /root/.cache/pip/*
+
+RUN --mount=type=cache,target=/root/.cache/pip \
+    uv pip install --system --no-build-isolation mamba-ssm==2.2.4 \
+    && rm -rf /root/.cache/pip/*
+
+RUN --mount=type=cache,target=/root/.cache/pip \
+    uv pip install --system --no-build-isolation causal-conv1d==1.5.0.post8 \
+    && rm -rf /root/.cache/pip/*
 
 # Copy application code last (changes most frequently)
 COPY app/ app/
