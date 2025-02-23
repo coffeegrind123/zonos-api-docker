@@ -6,7 +6,7 @@ WORKDIR /app
 # Install system dependencies
 RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
     --mount=type=cache,target=/var/lib/apt,sharing=locked \
-    apt-get update && apt-get install -y \
+    apt-get update && DEBIAN_FRONTEND=noninteractive apt-get install -y \
     ffmpeg \
     libsndfile1 \
     git \
