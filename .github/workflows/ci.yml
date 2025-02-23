@@ -38,6 +38,18 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
+      # Set image suffix based on branch
+      - name: Set image suffix
+        id: suffix
+        run: |
+          if [[ ${{ github.ref }} == refs/heads/main ]]; then
+            echo "suffix=" >> $GITHUB_OUTPUT
+          else
+            BRANCH=${GITHUB_REF#refs/heads/}
+            CLEAN_BRANCH=$(echo $BRANCH | tr '/' '-')
+            echo "suffix=-${CLEAN_BRANCH}" >> $GITHUB_OUTPUT
+          fi
+
       # Extract metadata (tags, labels) for Docker
       - name: Extract Docker metadata
         id: meta
@@ -45,13 +57,13 @@ jobs:
         with:
           images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
           tags: |
-            type=schedule
-            type=ref,event=branch
+            type=raw,value=latest${{ steps.suffix.outputs.suffix }}
+            type=sha,format=short,prefix=${{ steps.suffix.outputs.suffix }}-
+            type=ref,event=tag
             type=ref,event=pr
             type=semver,pattern={{version}}
             type=semver,pattern={{major}}.{{minor}}
             type=semver,pattern={{major}}
-            type=sha
 
       # Build and push Docker image
       - name: Build and push Docker image

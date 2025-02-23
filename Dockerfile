@@ -23,8 +23,13 @@ RUN git clone https://github.com/Zyphra/Zonos.git /app/zonos \
     && git submodule update --init --recursive \
     && cd ..
 
-# Install Zonos in editable mode
-RUN pip3 install -e /app/zonos
+# Install Zonos and its dependencies
+RUN pip3 install /app/zonos \
+    && pip3 install kanjize>=1.5.0 \
+    inflect>=7.5.0 \
+    phonemizer>=3.3.0 \
+    sudachidict-full>=20241021 \
+    sudachipy>=0.6.10
 
 # Install specific wheel files with GPU support
 RUN FLASH_ATTENTION_SKIP_CUDA_BUILD=TRUE pip3 install flash-attn --no-build-isolation \
