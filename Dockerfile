@@ -1,9 +1,9 @@
 FROM pytorch/pytorch:2.1.0-cuda12.1-cudnn8-devel
 
-# Set working directory
-WORKDIR /app
+# Set Zonos working directory
+WORKDIR /app/zonos
 
-# Install system dependencies with cleanup
+# System packages
 RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
     --mount=type=cache,target=/var/lib/apt,sharing=locked \
     apt-get update && DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
@@ -18,24 +18,21 @@ RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
 RUN --mount=type=cache,target=/root/.cache/pip \
     pip3 install --no-cache-dir uv
 
-# Copy dependency files first
-COPY requirements.txt pyproject.toml ./
-
-# Install Python dependencies with caching in smaller chunks
-RUN --mount=type=cache,target=/root/.cache/pip \
-    uv pip install --system -r requirements.txt \
-    && rm -rf /root/.cache/pip/*
-
-# Clone Zonos repository with minimal depth
-RUN git clone --depth 1 https://github.com/Zyphra/Zonos.git /app/zonos \
-    && cd /app/zonos \
+# Clone Zonos directly into working directory
+RUN git clone --depth 1 https://github.com/Zyphra/Zonos.git . \
     && git submodule update --init --recursive
 
-# Install Zonos and its dependencies in smaller chunks
+# Copy dependency specs and application code
+COPY requirements.txt pyproject.toml ./
+COPY app/ app/
+
+# Install all Python dependencies
 RUN --mount=type=cache,target=/root/.cache/pip \
-    cd /app/zonos \
-    && uv pip install --system -e . \
-    && rm -rf /root/.cache/pip/*
+    uv pip install --system -r requirements.txt -e .[compile] \
+    && uv pip install --system --no-build-isolation \
+    flash-attn \
+    mamba-ssm==2.2.4 \
+    causal-conv1d==1.5.0.post8
 
 RUN --mount=type=cache,target=/root/.cache/pip \
     uv pip install --system \
