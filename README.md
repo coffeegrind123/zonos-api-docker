@@ -1,33 +1,58 @@
 # Zonos API
 
-A FastAPI-based REST API for the Zonos text-to-speech model. This API provides endpoints for generating high-quality speech from text using state-of-the-art machine learning models.
+> ⚠️ **WARNING: UNSTABLE API - INITIAL RELEASE** ⚠️
+> 
+> This API is currently in its initial release phase (v1.0.0) and is considered unstable.
+> Breaking changes may occur without notice. Use in production at your own risk.
+> For development and testing purposes only.
+
+A production-grade FastAPI implementation of the Zonos Text-to-Speech model.
+
+## Credits
+
+This API is built on top of the [Zonos-v0.1-hybrid](https://huggingface.co/Zyphra/Zonos-v0.1-hybrid) and [Zonos-v0.1-transformer](https://huggingface.co/Zyphra/Zonos-v0.1-transformer) models created by [Zyphra](https://huggingface.co/Zyphra). The models feature:
+
+- Zero-shot TTS with voice cloning capabilities
+- Support for multiple languages (100+ languages via eSpeak-ng)
+- High-quality 44kHz audio output
+- Fine-grained control over speaking rate, pitch, audio quality, and emotions
+- Real-time performance (~2x real-time on RTX 4090)
+
+For more information, visit the model cards on Hugging Face: [Hybrid](https://huggingface.co/Zyphra/Zonos-v0.1-hybrid) | [Transformer](https://huggingface.co/Zyphra/Zonos-v0.1-transformer).
 
 ## Features
 
-- Text-to-speech generation using Zonos models
-- Support for multiple languages
-- Voice cloning capabilities
-- Emotion control
-- Various audio quality parameters
-- GPU acceleration support
+- FastAPI-based REST API for Zonos Text-to-Speech model
+- Support for both Transformer and Hybrid model variants
+- Docker and docker-compose support with NVIDIA GPU acceleration
+- Production-ready with Gunicorn workers and optimizations
+- Prometheus and Grafana monitoring integration
+- Health checks and comprehensive logging
+- CORS support and Swagger documentation
+- Voice cloning and audio continuation support
+- Fine-grained emotion and audio quality control
 
-## Prerequisites
+## Quick Start
 
-- Docker and Docker Compose
-- NVIDIA GPU with CUDA support
-- NVIDIA Container Toolkit installed
+### Using Pre-built Image
 
-## Installation
-
-1. Clone the repository:
+The fastest way to get started is using our pre-built Docker image:
 ```bash
-git clone https://github.com/yourusername/zonos-api.git
-cd zonos-api
+docker pull ghcr.io/manascb1344/zonos-api-gpu:v1.0.0
+docker run -d \
+  --name zonos-api-gpu \
+  --gpus all \
+  -p 8000:8000 \
+  -e CUDA_VISIBLE_DEVICES=0 \
+  zonos-api-gpu
 ```
 
-2. Start the API using Docker Compose:
+### Manual Installation
+
+1. Clone the repository with submodules:
 ```bash
-docker-compose up --build
+git clone --recursive https://github.com/manascb1344/zonos-api
+cd zonos-api
 ```
 
 The API will be available at `http://localhost:8000`
@@ -110,19 +135,19 @@ The API uses NVIDIA GPU acceleration by default. Make sure you have:
 
 ## Development
 
-To run the API in development mode:
+### Prerequisites
+- Python 3.10+
+- NVIDIA GPU with CUDA support (recommended)
+- Docker and docker-compose (for containerized deployment)
 
+### Local Development
 ```bash
+# Start in development mode
+uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
+
+# Or with docker-compose
 docker-compose up --build
 ```
-
-The API will reload automatically when code changes are detected.
-
-## API Documentation
-
-Once the API is running, you can access:
-- Swagger UI documentation at `http://localhost:8000/docs`
-- ReDoc documentation at `http://localhost:8000/redoc`
 
 ## License
 
