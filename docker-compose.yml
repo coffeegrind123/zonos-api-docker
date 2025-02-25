@@ -1,16 +1,14 @@
 version: '3.8'
 
 services:
-  zonos-api:
+  zonos:
     build: .
+    image: zonos-local
     ports:
       - "8000:8000"
-    volumes:
-      - ./app:/app/app
-      - ./uploaded_audio:/app/uploaded_audio
     environment:
-      - USE_GPU=true
-      - PYTHONPATH=/app
+      - CUDA_VISIBLE_DEVICES=0
+      - NVIDIA_VISIBLE_DEVICES=all
     deploy:
       resources:
         reservations:

@@ -32,6 +32,41 @@ docker-compose up --build
 
 The API will be available at `http://localhost:8000`
 
+## Running with Docker
+
+1. Build the container:
+```bash
+docker build -t zonos-api .
+```
+
+2. Run the container:
+```bash
+docker run -d \
+  --name zonos-api \
+  --gpus all \
+  -p 8000:8000 \
+  -e CUDA_VISIBLE_DEVICES=0 \
+  zonos-api
+```
+
+## Environment Variables
+
+- `CUDA_VISIBLE_DEVICES`: Specify which GPU(s) to use (default: 0)
+- `USE_GPU`: Enable/disable GPU usage (default: true)
+
+## Requirements
+
+- Docker with NVIDIA Container Toolkit installed
+- NVIDIA GPU with CUDA support
+- At least 8GB of GPU memory recommended
+
+## Verifying the Installation
+
+Check if the API is running:
+```bash
+curl http://localhost:8000/health
+```
+
 ## API Endpoints
 
 ### GET /
