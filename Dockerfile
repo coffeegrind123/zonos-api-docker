@@ -1,60 +1,68 @@
-FROM pytorch/pytorch:2.6.0-cuda12.4-cudnn9-devel
+FROM pytorch/pytorch:2.1.0-cuda12.1-cudnn8-devel
 
-WORKDIR /app
+# Set Zonos working directory
+WORKDIR /app/zonos
 
-# Install system dependencies
-RUN apt-get update && apt-get install -y \
-    build-essential \
+# System packages
+RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
+    --mount=type=cache,target=/var/lib/apt,sharing=locked \
+    apt-get update && DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
+    ffmpeg \
     libsndfile1 \
-    espeak-ng \
-    curl \
     git \
+    espeak-ng \
+    && apt-get clean \
     && rm -rf /var/lib/apt/lists/*
 
-# Install uv
-RUN pip install -U uv
+# Install uv package manager
+RUN --mount=type=cache,target=/root/.cache/pip \
+    pip3 install --no-cache-dir uv
 
-# Copy application code and submodules
-COPY . .
+# Clone Zonos directly into working directory
+RUN git clone --depth 1 https://github.com/Zyphra/Zonos.git . \
+    && git submodule update --init --recursive
 
-# Initialize and update submodules
-RUN git submodule update --init --recursive --remote
+# Copy dependency specs and application code
+COPY requirements.txt pyproject.toml ./
+COPY app/ app/
 
-# Install dependencies with optimizations
-RUN uv pip install --system --no-build-isolation -e .[compile] && \
-    # Install flash-attention and other optimizations
-    pip install --no-build-isolation \
-    flash-attn \
-    mamba-ssm \
-    causal-conv1d
+# Install basic Python dependencies first
+RUN --mount=type=cache,target=/root/.cache/pip \
+    uv pip install --system -r requirements.txt -e .[compile]
 
-# Create a non-root user and setup directories
-RUN useradd -m -u 1000 appuser && \
-    mkdir -p /home/appuser/.cache/huggingface && \
-    chown -R appuser:appuser /home/appuser/.cache && \
-    mkdir -p /app/uploads && \
-    chown -R appuser:appuser /app
-
-USER appuser
-
-# Set environment variables
-ENV PORT=8000
-ENV WORKERS=4
-ENV MODEL_TYPE="Transformer"
-ENV MODEL_CACHE_DIR="/home/appuser/.cache/huggingface"
-ENV PYTHONUNBUFFERED=1
-# CUDA optimization settings
-ENV CUDA_LAUNCH_BLOCKING=0
+# Install Flash Attention with specific compiler flags
 ENV TORCH_CUDA_ARCH_LIST="7.0;7.5;8.0;8.6+PTX"
-ENV CUDA_HOME="/usr/local/cuda"
-ENV MAX_JOBS=4
+ENV FLASH_ATTENTION_FORCE_BUILD=1
+RUN --mount=type=cache,target=/root/.cache/pip \
+    uv pip install --system --no-build-isolation \
+    git+https://github.com/Dao-AILab/flash-attention.git@v2.5.6
 
-# Expose the port
-EXPOSE $PORT
+# Install remaining ML dependencies
+RUN --mount=type=cache,target=/root/.cache/pip \
+    uv pip install --system --no-build-isolation \
+    mamba-ssm==2.2.4 \
+    causal-conv1d==1.5.0.post8
 
-# Add healthcheck
-HEALTHCHECK --interval=30s --timeout=10s --start-period=40s --retries=3 \
-    CMD curl -f http://localhost:$PORT/health || exit 1
+RUN --mount=type=cache,target=/root/.cache/pip \
+    uv pip install --system \
+    kanjize>=1.5.0 \
+    inflect>=7.5.0 \
+    && rm -rf /root/.cache/pip/*
 
-# Run the application with Gunicorn
-CMD ["sh", "-c", "gunicorn main:app --workers $WORKERS --worker-class uvicorn.workers.UvicornWorker --bind 0.0.0.0:$PORT --timeout 300 --worker-tmp-dir /dev/shm"]
+RUN --mount=type=cache,target=/root/.cache/pip \
+    uv pip install --system \
+    phonemizer>=3.3.0 \
+    sudachidict-full>=20241021 \
+    sudachipy>=0.6.10 \
+    && rm -rf /root/.cache/pip/*
+
+# Copy application code last
+COPY app/ app/
+
+# Environment variables
+ENV PYTHONPATH=/app:/app/zonos \
+    USE_GPU=true \
+    PYTHONUNBUFFERED=1
+
+# Run the application
+CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000"]

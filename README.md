@@ -1,171 +1,128 @@
 # Zonos API
 
-> ⚠️ **WARNING: UNSTABLE API - INITIAL RELEASE** ⚠️
-> 
-> This API is currently in its initial release phase (v1.0.0) and is considered unstable.
-> Breaking changes may occur without notice. Use in production at your own risk.
-> For development and testing purposes only.
-
-A production-grade FastAPI implementation of the Zonos Text-to-Speech model.
-
-## Credits
-
-This API is built on top of the [Zonos-v0.1-hybrid](https://huggingface.co/Zyphra/Zonos-v0.1-hybrid) and [Zonos-v0.1-transformer](https://huggingface.co/Zyphra/Zonos-v0.1-transformer) models created by [Zyphra](https://huggingface.co/Zyphra). The models feature:
-
-- Zero-shot TTS with voice cloning capabilities
-- Support for multiple languages (100+ languages via eSpeak-ng)
-- High-quality 44kHz audio output
-- Fine-grained control over speaking rate, pitch, audio quality, and emotions
-- Real-time performance (~2x real-time on RTX 4090)
-
-For more information, visit the model cards on Hugging Face: [Hybrid](https://huggingface.co/Zyphra/Zonos-v0.1-hybrid) | [Transformer](https://huggingface.co/Zyphra/Zonos-v0.1-transformer).
+A FastAPI-based REST API for the Zonos text-to-speech model. This API provides endpoints for generating high-quality speech from text using state-of-the-art machine learning models.
 
 ## Features
 
-- FastAPI-based REST API for Zonos Text-to-Speech model
-- Support for both Transformer and Hybrid model variants
-- Docker and docker-compose support with NVIDIA GPU acceleration
-- Production-ready with Gunicorn workers and optimizations
-- Prometheus and Grafana monitoring integration
-- Health checks and comprehensive logging
-- CORS support and Swagger documentation
-- Voice cloning and audio continuation support
-- Fine-grained emotion and audio quality control
+- Text-to-speech generation using Zonos models
+- Support for multiple languages
+- Voice cloning capabilities
+- Emotion control
+- Various audio quality parameters
+- GPU acceleration support
 
-## Quick Start
+## Prerequisites
 
-### Using Docker Compose (Recommended)
+- Docker and Docker Compose
+- NVIDIA GPU with CUDA support
+- NVIDIA Container Toolkit installed
+
+## Installation
+
+1. Clone the repository:
 ```bash
-# Clone the repository with submodules
-git clone --recursive https://github.com/manascb1344/zonos-api
-cd zonos-api
-
-# Or if you already cloned without --recursive:
-git submodule update --init --recursive
-
-# Start the services (API, Prometheus, Grafana)
-docker-compose up -d
-
-# The services will be available at:
-# - API: http://localhost:8000
-# - Swagger docs: http://localhost:8000/docs
-# - Prometheus: http://localhost:9090
-# - Grafana: http://localhost:3000 (admin/admin)
-
-# To update submodules to latest version:
-git submodule update --remote
-docker-compose up -d --build
-```
-
-### Manual Installation
-
-1. Clone the repository with submodules:
-```bash
-git clone --recursive https://github.com/manascb1344/zonos-api
+git clone https://github.com/yourusername/zonos-api.git
 cd zonos-api
 ```
 
-2. Install system dependencies:
+2. Start the API using Docker Compose:
 ```bash
-apt-get update && apt-get install -y \
-    build-essential \
-    libsndfile1 \
-    espeak-ng \
-    curl
+docker-compose up --build
 ```
 
-3. Install Python dependencies:
-```bash
-# Install dependencies
-pip install -r requirements.txt
-pip install --no-build-isolation -e .[compile]  # For GPU optimizations
+The API will be available at `http://localhost:8000`
 
-# Install Zonos from submodule
-cd Zonos
-pip install -e .
-cd ..
+## Running with Docker
+
+1. Build the container:
+```bash
+docker build -t zonos-api .
 ```
 
-4. Run the application:
+2. Run the container:
 ```bash
-# Development
-uvicorn app.main:app --reload
+docker run -d \
+  --name zonos-api \
+  --gpus all \
+  -p 8000:8000 \
+  -e CUDA_VISIBLE_DEVICES=0 \
+  zonos-api
+```
 
-# Production
-gunicorn app.main:app --workers 4 --worker-class uvicorn.workers.UvicornWorker --bind 0.0.0.0:8000
+## Environment Variables
+
+- `CUDA_VISIBLE_DEVICES`: Specify which GPU(s) to use (default: 0)
+- `USE_GPU`: Enable/disable GPU usage (default: true)
+
+## Requirements
+
+- Docker with NVIDIA Container Toolkit installed
+- NVIDIA GPU with CUDA support
+- At least 8GB of GPU memory recommended
+
+## Verifying the Installation
+
+Check if the API is running:
+```bash
+curl http://localhost:8000/health
 ```
 
 ## API Endpoints
 
 ### GET /
-Root endpoint that returns API status and available models
+Root endpoint that returns basic API information
 
-### GET /health
-Health check endpoint that returns current model status
+### GET /models
+Returns a list of available TTS models
 
-### POST /tts
-Text-to-speech conversion endpoint
+### GET /languages
+Returns a list of supported languages
 
-Request body:
+### GET /model/{model_name}/conditioners
+Returns available conditioners for a specific model
+
+### POST /synthesize
+Generate speech from text. Example request:
+
 ```json
 {
-    "text": "Text to convert to speech",
-    "model_type": "Transformer",  // or "Hybrid"
-    "language": "en-us",
-    "emotion1": 0.6,  // Happiness
-    "emotion2": 0.05, // Sadness
-    "emotion3": 0.05, // Disgust
-    "emotion4": 0.05, // Fear
-    "emotion5": 0.05, // Surprise
-    "emotion6": 0.05, // Anger
-    "emotion7": 0.5,  // Other
-    "emotion8": 0.6,  // Neutral
-    "speaker_audio": null,  // Optional: Path to reference voice
-    "prefix_audio": null,   // Optional: Path to continue from
-    "cfg_scale": 2.0,
-    "min_p": 0.1,
-    "seed": 420
+  "model_choice": "Zyphra/Zonos-v0.1-transformer",
+  "text": "Hello, this is a test.",
+  "language": "en-us",
+  "emotion_values": [1.0, 0.05, 0.05, 0.05, 0.05, 0.05, 0.1, 0.2],
+  "vq_score": 0.78,
+  "cfg_scale": 2.0,
+  "min_p": 0.15
 }
 ```
 
-Response: Audio file (WAV format, 44.1kHz)
-
 ## Environment Variables
 
-- `PORT`: Server port (default: 8000)
-- `WORKERS`: Number of Gunicorn workers (default: 4)
-- `MODEL_TYPE`: Model variant to use (default: "Transformer")
-- `MODEL_CACHE_DIR`: Directory for model caching
-- Various CUDA optimization settings (see Dockerfile)
+- `USE_GPU`: Set to "true" to enable GPU acceleration (default: true)
+- `PYTHONPATH`: Set to the application root directory
 
-## Production Deployment
+## GPU Support
 
-The application is containerized and optimized for production use. Features include:
-
-- NVIDIA GPU support with CUDA optimizations
-- Resource limits and monitoring
-- Automatic model caching
-- Health checks and automatic restarts
-- Prometheus metrics and Grafana dashboards
-- Proper logging with rotation
-- Shared memory optimization
-- Security considerations (non-root user, proper permissions)
+The API uses NVIDIA GPU acceleration by default. Make sure you have:
+1. NVIDIA GPU with CUDA support
+2. NVIDIA drivers installed
+3. NVIDIA Container Toolkit installed and configured
 
 ## Development
 
-### Prerequisites
-- Python 3.9+
-- NVIDIA GPU with CUDA support (recommended)
-- Docker and docker-compose (for containerized deployment)
+To run the API in development mode:
 
-### Local Development
 ```bash
-# Start in development mode
-uvicorn app.main:app --reload
-
-# Or with docker-compose
 docker-compose up --build
 ```
+
+The API will reload automatically when code changes are detected.
+
+## API Documentation
+
+Once the API is running, you can access:
+- Swagger UI documentation at `http://localhost:8000/docs`
+- ReDoc documentation at `http://localhost:8000/redoc`
 
 ## License
 

@@ -1,89 +1,18 @@
 version: '3.8'
 
 services:
-  api:
-    build:
-      context: .
-      dockerfile: Dockerfile
-      args:
-        BUILDKIT_INLINE_CACHE: 1
-        GIT_SUBMODULE_UPDATE: 1  # Enable submodule update during build
-    image: zonos-api:latest
+  zonos:
+    build: .
+    image: zonos-local
     ports:
       - "8000:8000"
     environment:
-      - PORT=8000
-      - WORKERS=4
-      - MODEL_TYPE=Transformer
-      - MODEL_CACHE_DIR=/home/appuser/.cache/huggingface
-      - PYTHONUNBUFFERED=1
+      - CUDA_VISIBLE_DEVICES=0
       - NVIDIA_VISIBLE_DEVICES=all
-      - NVIDIA_DRIVER_CAPABILITIES=all
-      - CUDA_LAUNCH_BLOCKING=0
-      - TORCH_CUDA_ARCH_LIST=7.0;7.5;8.0;8.6+PTX
-      - CUDA_HOME=/usr/local/cuda
-      - MAX_JOBS=4
-    volumes:
-      - model_cache:/home/appuser/.cache/huggingface
-      - audio_uploads:/app/uploads
-      - /tmp/.X11-unix:/tmp/.X11-unix  # For GPU monitoring
     deploy:
       resources:
-        limits:
-          memory: 16G
-          cpus: '8'
+        reservations:
           devices:
             - driver: nvidia
-              count: all
+              count: 1
               capabilities: [gpu]
-    healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
-      interval: 30s
-      timeout: 10s
-      retries: 3
-      start_period: 40s
-    restart: unless-stopped
-    shm_size: '4gb'  # Increased shared memory for better performance
-    ulimits:
-      memlock: -1  # Unlimited memory lock for GPU operations
-    runtime: nvidia  # Enable NVIDIA runtime for GPU support
-    logging:
-      driver: "json-file"
-      options:
-        max-size: "200m"
-        max-file: "10"
-
-  prometheus:
-    image: prom/prometheus:latest
-    volumes:
-      - ./prometheus.yml:/etc/prometheus/prometheus.yml
-      - prometheus_data:/prometheus
-    command:
-      - '--config.file=/etc/prometheus/prometheus.yml'
-      - '--storage.tsdb.path=/prometheus'
-    ports:
-      - "9090:9090"
-    depends_on:
-      - api
-
-  grafana:
-    image: grafana/grafana:latest
-    volumes:
-      - grafana_data:/var/lib/grafana
-    environment:
-      - GF_SECURITY_ADMIN_PASSWORD=admin
-      - GF_USERS_ALLOW_SIGN_UP=false
-    ports:
-      - "3000:3000"
-    depends_on:
-      - prometheus
-
-volumes:
-  model_cache:
-    driver: local
-  audio_uploads:
-    driver: local
-  prometheus_data:
-    driver: local
-  grafana_data:
-    driver: local 
