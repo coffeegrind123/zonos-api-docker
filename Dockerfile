@@ -1,5 +1,9 @@
 FROM pytorch/pytorch:2.1.0-cuda12.1-cudnn8-devel
 
+LABEL org.opencontainers.image.source=https://github.com/manascb1344/zonos-api
+LABEL org.opencontainers.image.description="Zonos API with GPU support"
+LABEL org.opencontainers.image.licenses=MIT
+
 # Set Zonos working directory
 WORKDIR /app/zonos
 
