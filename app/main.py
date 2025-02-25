@@ -4,10 +4,22 @@ import io
 import wave
 import numpy as np
 from typing import List, Optional
+import logging
+import sys
 
 from .models import TTSRequest
 from .services.tts import TTSService
 from .config import MAX_CHARACTERS
+
+# Configure logging
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
+    handlers=[
+        logging.StreamHandler(sys.stdout)
+    ]
+)
+logger = logging.getLogger("zonos-tts-api")
 
 # Initialize FastAPI app
 app = FastAPI(
@@ -23,40 +35,55 @@ def get_tts_service() -> TTSService:
     """Get or initialize TTS service singleton."""
     global _tts_service
     if _tts_service is None:
+        logger.info("Initializing TTS service")
         _tts_service = TTSService()
     return _tts_service
 
 @app.get("/")
 async def root():
     """Root endpoint."""
+    logger.debug("Root endpoint accessed")
     return {"message": "Zonos Text-to-Speech API"}
 
 @app.get("/models")
 async def get_models():
     """Get available TTS models."""
+    logger.debug("Fetching available models")
     service = get_tts_service()
-    return {"models": service.get_model_names()}
+    models = service.get_model_names()
+    logger.info(f"Retrieved {len(models)} models")
+    return {"models": models}
 
 @app.get("/languages")
 async def get_languages():
     """Get supported languages."""
+    logger.debug("Fetching supported languages")
     service = get_tts_service()
-    return {"languages": service.get_supported_languages()}
+    languages = service.get_supported_languages()
+    logger.info(f"Retrieved {len(languages)} supported languages")
+    return {"languages": languages}
 
 @app.get("/model/conditioners")
 async def get_model_conditioners(model_name: str):
     """Get available conditioners for a specific model."""
+    logger.debug(f"Fetching conditioners for model: {model_name}")
     service = get_tts_service()
-    print(f"Requested model: {model_name}")  # Debugging line
-    print(f"Available models: {service.get_model_names()}")  # Debugging line
+    logger.info(f"Requested model: {model_name}")
+    logger.debug(f"Available models: {service.get_model_names()}")
     if model_name not in service.get_model_names():
+        logger.warning(f"Model not found: {model_name}")
         raise HTTPException(status_code=404, detail="Model not found")
-    return {"conditioners": service.get_model_conditioners(model_name)}
+    conditioners = service.get_model_conditioners(model_name)
+    logger.info(f"Retrieved {len(conditioners)} conditioners for model {model_name}")
+    return {"conditioners": conditioners}
 
 @app.post("/synthesize")
 async def synthesize_speech(request: TTSRequest):
     """Generate speech from text."""
+    logger.info(f"Speech synthesis requested for text of length {len(request.text)} chars using model {request.model_choice}")
+    
     if len(request.text) > MAX_CHARACTERS:
+        logger.warning(f"Text length ({len(request.text)}) exceeds maximum of {MAX_CHARACTERS} characters")
         raise HTTPException(
             status_code=400,
             detail=f"Text length exceeds maximum of {MAX_CHARACTERS} characters"
@@ -65,6 +92,9 @@ async def synthesize_speech(request: TTSRequest):
     service = get_tts_service()
     
     try:
+        logger.debug(f"Starting audio generation with params: language={request.language}, "
+                    f"speaking_rate={request.speaking_rate}, seed={request.seed}")
+        
         # Generate audio using TTS service
         (sample_rate, audio_data), seed = service.generate_audio(
             model_choice=request.model_choice,
@@ -91,6 +121,8 @@ async def synthesize_speech(request: TTSRequest):
             quadratic=request.quadratic,
         )
 
+        logger.info(f"Successfully generated audio with sample rate {sample_rate}Hz, seed {seed}")
+
         # Convert to WAV format
         wav_buffer = io.BytesIO()
         with wave.open(wav_buffer, 'wb') as wav_file:
@@ -107,8 +139,9 @@ async def synthesize_speech(request: TTSRequest):
             headers={"x-seed": str(seed)}
         )
         
+        logger.debug("Returning WAV audio stream response")
         return response
 
     except Exception as e:
-        print(f"Error occurred: {str(e)}")  # Added verbose logging
+        logger.error(f"Error during speech synthesis: {str(e)}", exc_info=True)
         raise HTTPException(status_code=500, detail=str(e)) 
