@@ -13,10 +13,21 @@ logger = logging.getLogger(__name__)
 class TTSService:
     def __init__(self, device: str = "cuda"):
         self.device = device
-        self.model_names = ["Zyphra/Zonos-v0.1-transformer"]
-        self.models = {
-            name: Zonos.from_pretrained(name, device=device, backbone="torch") 
-            for name in self.model_names
+        self.model_names = ["Zyphra/Zonos-v0.1-transformer", "Zyphra/Zonos-v0.1-hybrid"]
+        
+        # Try to load each model, skip if not available
+        self.models = {}
+        for name in self.model_names:
+            try:
+                self.models[name] = Zonos.from_pretrained(name, device=device, backbone="torch")
+                logger.info(f"Successfully loaded model: {name}")
+            except Exception as e:
+                logger.warning(f"Failed to load model {name}: {e}")
+        
+        # Model name mapping for compatibility with different naming conventions
+        self.model_aliases = {
+            "zonos-v0.1-transformer": "Zyphra/Zonos-v0.1-transformer",
+            "zonos-v0.1-hybrid": "Zyphra/Zonos-v0.1-hybrid",
         }
         
         # Debugging: Print loaded models
@@ -70,7 +81,15 @@ class TTSService:
         Returns a tuple of ((sample_rate, audio_data), seed).
         """
         logger.info(f"Generating audio for model: {model_choice}")
-        selected_model = self.models[model_choice]
+        
+        # Map model name if it's an alias
+        actual_model_name = self.model_aliases.get(model_choice, model_choice)
+        logger.info(f"Mapped model name: {model_choice} -> {actual_model_name}")
+        
+        if actual_model_name not in self.models:
+            raise ValueError(f"Model '{model_choice}' (mapped to '{actual_model_name}') not found. Available models: {list(self.models.keys())}")
+            
+        selected_model = self.models[actual_model_name]
 
         if randomize_seed:
             seed = torch.randint(0, 2**32 - 1, (1,)).item()

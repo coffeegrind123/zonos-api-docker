@@ -1,5 +1,6 @@
 from fastapi import FastAPI, HTTPException
 from fastapi.responses import StreamingResponse
+from fastapi.middleware.cors import CORSMiddleware
 import io
 import wave
 import numpy as np
@@ -7,7 +8,7 @@ from typing import List, Optional
 import logging
 import sys
 
-from .models import TTSRequest
+from .models import TTSRequest, SillyTavernTTSRequest
 from .services.tts import TTSService
 from .config import MAX_CHARACTERS
 
@@ -26,6 +27,15 @@ app = FastAPI(
     title="Zonos Text-to-Speech API",
     description="API for generating high-quality speech using Zonos models",
     version="0.1.0"
+)
+
+# Add CORS middleware to handle browser requests
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],  # Allow requests from any origin
+    allow_credentials=True,
+    allow_methods=["*"],  # Allow all HTTP methods
+    allow_headers=["*"],  # Allow all headers
 )
 
 # TTS service instance
@@ -144,4 +154,84 @@ async def synthesize_speech(request: TTSRequest):
 
     except Exception as e:
         logger.error(f"Error during speech synthesis: {str(e)}", exc_info=True)
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.post("/v1/audio/text-to-speech")
+async def sillytavern_synthesize_speech(request: SillyTavernTTSRequest):
+    """Generate speech from text using SillyTavern TTSSorcery extension format."""
+    logger.info(f"SillyTavern TTS request for text of length {len(request.text)} chars using model {request.model}")
+    
+    if len(request.text) > MAX_CHARACTERS:
+        logger.warning(f"Text length ({len(request.text)}) exceeds maximum of {MAX_CHARACTERS} characters")
+        raise HTTPException(
+            status_code=400,
+            detail=f"Text length exceeds maximum of {MAX_CHARACTERS} characters"
+        )
+
+    service = get_tts_service()
+    
+    try:
+        # Convert SillyTavern request to internal format
+        internal_request = request.to_tts_request()
+        
+        logger.debug(f"Starting audio generation with SillyTavern params: model={request.model}, "
+                    f"speaking_rate={request.speaking_rate}, emotions={request.emotion}")
+        
+        # Generate audio using TTS service
+        (sample_rate, audio_data), seed = service.generate_audio(
+            model_choice=internal_request.model_choice,
+            text=internal_request.text,
+            language=internal_request.language,
+            speaker_audio=internal_request.speaker_audio,
+            prefix_audio=internal_request.prefix_audio,
+            emotion_values=internal_request.emotion_values,
+            vq_score=internal_request.vq_score,
+            fmax=internal_request.fmax,
+            pitch_std=internal_request.pitch_std,
+            speaking_rate=internal_request.speaking_rate,
+            dnsmos_ovrl=internal_request.dnsmos_ovrl,
+            speaker_noised=internal_request.speaker_noised,
+            cfg_scale=internal_request.cfg_scale,
+            min_p=internal_request.min_p,
+            seed=internal_request.seed,
+            randomize_seed=internal_request.randomize_seed,
+            unconditional_keys=internal_request.unconditional_keys,
+            top_p=internal_request.top_p,
+            top_k=internal_request.top_k,
+            linear=internal_request.linear,
+            confidence=internal_request.confidence,
+            quadratic=internal_request.quadratic,
+        )
+
+        logger.info(f"Successfully generated audio with sample rate {sample_rate}Hz, seed {seed}")
+
+        # Convert to WAV format
+        wav_buffer = io.BytesIO()
+        with wave.open(wav_buffer, 'wb') as wav_file:
+            wav_file.setnchannels(1)
+            wav_file.setsampwidth(2)  # 16-bit audio
+            wav_file.setframerate(sample_rate)
+            wav_file.writeframes((audio_data * 32767).astype(np.int16).tobytes())
+
+        # Clean up temporary speaker audio file if created
+        if internal_request.speaker_audio and internal_request.speaker_audio != request.speaker_audio:
+            try:
+                import os
+                os.unlink(internal_request.speaker_audio)
+            except Exception:
+                pass
+
+        # Prepare response
+        wav_buffer.seek(0)
+        response = StreamingResponse(
+            wav_buffer,
+            media_type="audio/wav",
+            headers={"x-seed": str(seed)}
+        )
+        
+        logger.debug("Returning WAV audio stream response for SillyTavern")
+        return response
+
+    except Exception as e:
+        logger.error(f"Error during SillyTavern speech synthesis: {str(e)}", exc_info=True)
         raise HTTPException(status_code=500, detail=str(e)) 

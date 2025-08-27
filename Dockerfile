@@ -30,18 +30,19 @@ RUN git clone --depth 1 https://github.com/Zyphra/Zonos.git . \
 COPY requirements.txt pyproject.toml ./
 COPY app/ app/
 
-# Install basic Python dependencies first
+# Upgrade PyTorch to cu121 and remove flash-attn to fix compatibility issues
+RUN --mount=type=cache,target=/root/.cache/pip \
+    pip3 install --no-cache-dir --upgrade --index-url https://download.pytorch.org/whl/cu121 \
+    torch==2.5.1+cu121 torchaudio==2.5.1+cu121 torchvision==0.20.1+cu121
+
+# Remove any existing flash-attn installations
+RUN pip3 uninstall -y flash-attn flash_attn || true
+
+# Install basic Python dependencies
 RUN --mount=type=cache,target=/root/.cache/pip \
     uv pip install --system -r requirements.txt -e .[compile]
 
-# Install Flash Attention with specific compiler flags
-ENV TORCH_CUDA_ARCH_LIST="7.0;7.5;8.0;8.6+PTX"
-ENV FLASH_ATTENTION_FORCE_BUILD=1
-RUN --mount=type=cache,target=/root/.cache/pip \
-    uv pip install --system --no-build-isolation \
-    git+https://github.com/Dao-AILab/flash-attention.git@v2.5.6
-
-# Install remaining ML dependencies
+# Install remaining ML dependencies without flash-attention
 RUN --mount=type=cache,target=/root/.cache/pip \
     uv pip install --system --no-build-isolation \
     mamba-ssm==2.2.4 \
