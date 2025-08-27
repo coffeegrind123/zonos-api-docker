@@ -1,11 +1,5 @@
 # Zonos API
 
-> ⚠️ **WARNING: UNSTABLE API - INITIAL RELEASE** ⚠️
-> 
-> This API is currently in its initial release phase (v1.0.0) and is considered unstable.
-> Breaking changes may occur without notice. Use in production at your own risk.
-> For development and testing purposes only.
-
 A production-grade FastAPI implementation of the Zonos Text-to-Speech model.
 
 ## Credits
@@ -34,28 +28,18 @@ For more information, visit the model cards on Hugging Face: [Hybrid](https://hu
 
 ## Quick Start
 
-### Using Pre-built Image
-
-The fastest way to get started is using our pre-built Docker image:
+1. Clone the repository:
 ```bash
-docker pull ghcr.io/manascb1344/zonos-api-gpu:v1.0.0
-docker run -d \
-  --name zonos-api-gpu \
-  --gpus all \
-  -p 8000:8000 \
-  -e CUDA_VISIBLE_DEVICES=0 \
-  zonos-api-gpu
+git clone https://github.com/coffeegrind123/zonos-api-docker
+cd zonos-api-docker
 ```
 
-### Manual Installation
-
-1. Clone the repository with submodules:
+2. Start the API using docker-compose:
 ```bash
-git clone --recursive https://github.com/manascb1344/zonos-api
-cd zonos-api
+docker-compose up --build
 ```
 
-The API will be available at `http://localhost:8000`
+The API will be available at `http://localhost:8181`
 
 ## Running with Docker
 
@@ -69,7 +53,7 @@ docker build -t zonos-api .
 docker run -d \
   --name zonos-api \
   --gpus all \
-  -p 8000:8000 \
+  -p 8181:8000 \
   -e CUDA_VISIBLE_DEVICES=0 \
   zonos-api
 ```
@@ -89,7 +73,7 @@ docker run -d \
 
 Check if the API is running:
 ```bash
-curl http://localhost:8000/health
+curl http://localhost:8181/
 ```
 
 ## API Endpoints
@@ -197,7 +181,7 @@ The API uses NVIDIA GPU acceleration by default. Make sure you have:
 # Start in development mode
 uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
 
-# Or with docker-compose
+# Or with docker-compose (recommended)
 docker-compose up --build
 ```
 
