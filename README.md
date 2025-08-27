@@ -107,7 +107,7 @@ Returns a list of supported languages
 Returns available conditioners for a specific model
 
 ### POST /synthesize
-Generate speech from text. Example request:
+Generate speech from text using the full API format. Example request:
 
 ```json
 {
@@ -121,10 +121,62 @@ Generate speech from text. Example request:
 }
 ```
 
+### POST /v1/audio/text-to-speech
+**SillyTavern TTSSorcery Extension Compatible Endpoint**
+
+Generate speech using the simplified format expected by the SillyTavern TTSSorcery extension. This endpoint automatically handles format conversion and model name mapping.
+
+Example request:
+```json
+{
+  "text": "Hello, this is a test.",
+  "model": "zonos-v0.1-transformer",
+  "speaking_rate": 15.0,
+  "emotion": {
+    "happiness": 0.8,
+    "neutral": 0.2
+  },
+  "vqscore": 0.78,
+  "speaker_noised": false,
+  "speaker_audio": null
+}
+```
+
+**Supported Models:**
+- `zonos-v0.1-transformer` (maps to `Zyphra/Zonos-v0.1-transformer`)
+- `zonos-v0.1-hybrid` (maps to `Zyphra/Zonos-v0.1-hybrid`)
+
+**Features:**
+- Automatic emotion mapping from named emotions to 8-element arrays
+- Base64 speaker audio support for voice cloning
+- No API key required when running locally
+- CORS enabled for browser requests
+
 ## Environment Variables
 
 - `USE_GPU`: Set to "true" to enable GPU acceleration (default: true)
 - `PYTHONPATH`: Set to the application root directory
+
+## SillyTavern Integration
+
+This API is fully compatible with the [SillyTavern TTSSorcery Extension](https://github.com/coffeegrind123/SillyTavern-TTSSorcery-Fork). 
+
+### Setup Instructions:
+1. Install the fixed TTSSorcery extension that supports local APIs without API keys
+2. Configure the extension settings:
+   - ✅ Check "Use Local Zonos API"
+   - Set "Local API URL" to: `http://localhost:8181`
+   - Leave "Zyphra API Key" field empty (not required for local usage)
+3. The extension will use the `/v1/audio/text-to-speech` endpoint automatically
+
+### Docker Setup for SillyTavern:
+```bash
+# Using docker-compose (recommended)
+docker-compose up --build
+
+# Or using docker directly
+docker run -d --gpus all -p 8181:8000 --name zonos-api zonos-local
+```
 
 ## GPU Support
 
