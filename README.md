@@ -141,26 +141,6 @@ Example request:
 - `USE_GPU`: Set to "true" to enable GPU acceleration (default: true)
 - `PYTHONPATH`: Set to the application root directory
 
-## SillyTavern Integration
-
-This API is fully compatible with the [SillyTavern TTSSorcery Extension](https://github.com/coffeegrind123/SillyTavern-TTSSorcery-Fork). 
-
-### Setup Instructions:
-1. Install the fixed TTSSorcery extension that supports local APIs without API keys
-2. Configure the extension settings:
-   - ✅ Check "Use Local Zonos API"
-   - Set "Local API URL" to: `http://localhost:8181`
-   - Leave "Zyphra API Key" field empty (not required for local usage)
-3. The extension will use the `/v1/audio/text-to-speech` endpoint automatically
-
-### Docker Setup for SillyTavern:
-```bash
-# Using docker-compose (recommended)
-docker-compose up --build
-
-# Or using docker directly
-docker run -d --gpus all -p 8181:8000 --name zonos-api zonos-local
-```
 
 ## GPU Support
 
