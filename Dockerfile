@@ -42,6 +42,14 @@ RUN pip3 uninstall -y flash-attn flash_attn || true
 RUN --mount=type=cache,target=/root/.cache/pip \
     uv pip install --system -r requirements.txt -e .[compile]
 
+# Install DeepSpeed for optional acceleration
+RUN --mount=type=cache,target=/root/.cache/pip \
+    uv pip install --system deepspeed
+
+# Install audio quality dependencies
+RUN --mount=type=cache,target=/root/.cache/pip \
+    uv pip install --system pyloudnorm
+
 # Install remaining ML dependencies without flash-attention
 RUN --mount=type=cache,target=/root/.cache/pip \
     uv pip install --system --no-build-isolation \
@@ -67,7 +75,14 @@ COPY app/ app/
 # Environment variables
 ENV PYTHONPATH=/app:/app/zonos \
     USE_GPU=true \
-    PYTHONUNBUFFERED=1
+    PYTHONUNBUFFERED=1 \
+    ENABLE_DEEPSPEED=false \
+    TRITON_CACHE_DIR=/app/triton_cache \
+    TRITON_DISABLE_LINE_INFO=1
+
+# Create Triton cache directory to avoid warnings
+RUN mkdir -p /root/.triton/autotune /app/triton_cache && \
+    chmod 755 /root/.triton /root/.triton/autotune /app/triton_cache
 
 # Run the application
 CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000"]

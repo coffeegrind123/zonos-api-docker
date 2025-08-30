@@ -8,6 +8,10 @@ numpy
 soundfile
 gradio
 pydantic
+deepspeed
+pyloudnorm
+audiobox_aesthetics
+huggingface_hub
 
 # Test dependencies
 pytest

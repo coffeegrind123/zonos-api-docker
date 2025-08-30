@@ -49,6 +49,14 @@ def get_tts_service() -> TTSService:
         _tts_service = TTSService()
     return _tts_service
 
+@app.on_event("startup")
+async def startup_event():
+    """Initialize services on startup."""
+    logger.info("🚀 Starting up Zonos TTS API - initializing services")
+    # Initialize TTS service and load default model
+    service = get_tts_service()
+    logger.info("✅ TTS service initialized and default model loaded")
+
 @app.get("/")
 async def root():
     """Root endpoint."""
@@ -133,20 +141,27 @@ async def synthesize_speech(request: TTSRequest):
 
         logger.info(f"Successfully generated audio with sample rate {sample_rate}Hz, seed {seed}")
 
-        # Convert to WAV format
+        # Convert to WAV format optimized for browser compatibility
         wav_buffer = io.BytesIO()
         with wave.open(wav_buffer, 'wb') as wav_file:
-            wav_file.setnchannels(1)
+            wav_file.setnchannels(1)  # Mono audio
             wav_file.setsampwidth(2)  # 16-bit audio
-            wav_file.setframerate(sample_rate)
-            wav_file.writeframes((audio_data * 32767).astype(np.int16).tobytes())
+            wav_file.setframerate(sample_rate)  # Use original sample rate
+            # Ensure proper scaling and clipping for 16-bit audio
+            audio_int16 = np.clip(audio_data * 32767, -32768, 32767).astype(np.int16)
+            wav_file.writeframes(audio_int16.tobytes())
 
-        # Prepare response
+        # Prepare response with browser-friendly headers
         wav_buffer.seek(0)
         response = StreamingResponse(
             wav_buffer,
             media_type="audio/wav",
-            headers={"x-seed": str(seed)}
+            headers={
+                "x-seed": str(seed),
+                "Cache-Control": "no-cache",
+                "Accept-Ranges": "bytes",
+                "Content-Disposition": "inline; filename=\"tts_audio.wav\""
+            }
         )
         
         logger.debug("Returning WAV audio stream response")
@@ -205,13 +220,15 @@ async def sillytavern_synthesize_speech(request: SillyTavernTTSRequest):
 
         logger.info(f"Successfully generated audio with sample rate {sample_rate}Hz, seed {seed}")
 
-        # Convert to WAV format
+        # Convert to WAV format optimized for browser compatibility
         wav_buffer = io.BytesIO()
         with wave.open(wav_buffer, 'wb') as wav_file:
-            wav_file.setnchannels(1)
+            wav_file.setnchannels(1)  # Mono audio
             wav_file.setsampwidth(2)  # 16-bit audio
-            wav_file.setframerate(sample_rate)
-            wav_file.writeframes((audio_data * 32767).astype(np.int16).tobytes())
+            wav_file.setframerate(sample_rate)  # Use original sample rate
+            # Ensure proper scaling and clipping for 16-bit audio
+            audio_int16 = np.clip(audio_data * 32767, -32768, 32767).astype(np.int16)
+            wav_file.writeframes(audio_int16.tobytes())
 
         # Clean up temporary speaker audio file if created
         if internal_request.speaker_audio and internal_request.speaker_audio != request.speaker_audio:
@@ -221,12 +238,17 @@ async def sillytavern_synthesize_speech(request: SillyTavernTTSRequest):
             except Exception:
                 pass
 
-        # Prepare response
+        # Prepare response with browser-friendly headers
         wav_buffer.seek(0)
         response = StreamingResponse(
             wav_buffer,
             media_type="audio/wav",
-            headers={"x-seed": str(seed)}
+            headers={
+                "x-seed": str(seed),
+                "Cache-Control": "no-cache",
+                "Accept-Ranges": "bytes",
+                "Content-Disposition": "inline; filename=\"tts_audio.wav\""
+            }
         )
         
         logger.debug("Returning WAV audio stream response for SillyTavern")
