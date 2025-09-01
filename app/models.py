@@ -4,6 +4,23 @@ import base64
 import tempfile
 import os
 
+class BatchTTSRequest(BaseModel):
+    """Request model for batch TTS generation"""
+    model_choice: str = Field(default="Zyphra/Zonos-v0.1-transformer", description="Model variant to use")
+    texts: List[str] = Field(..., description="List of texts to generate audio for")
+    language: str = Field(default="en-us", description="Language code")
+    emotion_values: List[float] = Field(
+        default=[1.0, 0.05, 0.05, 0.05, 0.05, 0.05, 0.1, 0.2],
+        description="List of 8 emotion values"
+    )
+    vq_score: float = Field(default=0.78, description="VQ Score value")
+    speaking_rate: float = Field(default=15.0, description="Speaking rate")
+    cfg_scale: float = Field(default=2.0, description="CFG scale value")
+    min_p: float = Field(default=0.15, description="Minimum probability")
+    seed: int = Field(default=420, description="Random seed")
+    randomize_seed: bool = Field(default=True, description="Whether to randomize seed")
+    speaker_audio: Optional[str] = Field(default=None, description="Base64 encoded audio or file path")
+
 class TTSRequest(BaseModel):
     model_choice: str = Field(description="Model variant to use")
     text: str = Field(description="Text to convert to speech")

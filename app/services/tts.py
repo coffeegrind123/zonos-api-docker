@@ -2,6 +2,8 @@ import torch
 import torchaudio
 import logging
 import os
+import asyncio
+from concurrent.futures import ThreadPoolExecutor
 from typing import List, Tuple, Optional, Dict, Any
 import numpy as np
 from zonos.model import Zonos
@@ -14,8 +16,10 @@ logger = logging.getLogger(__name__)
 def is_deepspeed_available():
     """Check if DeepSpeed is available for acceleration"""
     try:
-        import deepspeed
-        return True
+        # Only check if deepspeed package exists, don't import yet
+        import importlib.util
+        spec = importlib.util.find_spec("deepspeed")
+        return spec is not None
     except ImportError:
         return False
 
@@ -95,10 +99,27 @@ class TTSService:
         logger.info(f"🎯 Selected device: {device}")
         self.device = device
         
+        # Initialize thread pool executor for async operations
+        self.executor = ThreadPoolExecutor(max_workers=2, thread_name_prefix="tts-worker")
+        logger.info("🔄 Thread pool executor initialized for async processing")
+        
+        # Model warm-up tracking
+        self.model_cache_warmed = False
+        self._warmup_lock = asyncio.Lock()
+        
+        # Request batching for improved throughput
+        self.request_queue = asyncio.Queue(maxsize=10)
+        self.batch_processor_task = None
+        self.batch_size = 4  # Process up to 4 requests together
+        self.batch_timeout = 0.1  # Wait 100ms to collect batch
+        
+        # Memory optimization settings - defer CUDA initialization
+        self._cuda_initialized = False
+        
         # Available models with their compatibility status
         self.available_models = {
-            "Zyphra/Zonos-v0.1-transformer": {"status": "available", "supports_deepspeed": True},
-            "Zyphra/Zonos-v0.1-hybrid": {"status": "backbone_incompatible", "supports_deepspeed": False}
+            "Zyphra/Zonos-v0.1-transformer": {"status": "available", "supports_deepspeed": True, "supports_batch": True},
+            "Zyphra/Zonos-v0.1-hybrid": {"status": "available", "supports_deepspeed": True, "supports_batch": False}
         }
         
         # Single model slot (unload/reload on demand)
@@ -140,7 +161,10 @@ class TTSService:
             "zonos-v0.1-hybrid": "Zyphra/Zonos-v0.1-hybrid",
         }
         
-        # Load default model on startup for faster first request
+        # Initialize basic CPU/environment settings
+        self._setup_memory_optimizations()
+        
+        # Load default model on startup for faster first request (safe with uvicorn single worker)
         logger.info(f"📦 Loading default model on startup: {self.default_model}")
         try:
             self.current_model = self._load_single_model(self.default_model)
@@ -149,6 +173,209 @@ class TTSService:
         except Exception as e:
             logger.error(f"💥 Failed to load default model {self.default_model}: {e}")
             logger.warning("⚠️ Service starting without pre-loaded model - will load on first request")
+            # Ensure attributes are initialized even if loading fails
+            self.current_model = None
+            self.current_model_name = None
+
+    async def warmup_model(self, model_name: str = None):
+        """
+        Warm up model with dummy generation to eliminate cold start latency.
+        This preloads model weights into GPU memory and initializes CUDA kernels.
+        """
+        if model_name is None:
+            model_name = self.default_model
+            
+        async with self._warmup_lock:
+            if self.model_cache_warmed:
+                logger.debug(f"Model {model_name} already warmed up")
+                return
+                
+            logger.info(f"🔥 Starting model warm-up for {model_name}")
+            
+            try:
+                # Use a minimal text for warm-up with compatible parameters
+                warmup_text = "Hello."
+                warmup_params = {
+                    "model_choice": model_name,
+                    "text": warmup_text,
+                    "language": "en-us",
+                    "emotion_values": [1.0, 0.05, 0.05, 0.05, 0.05, 0.05, 0.1, 0.2],
+                    "vq_score": 0.78,
+                    "speaking_rate": 15.0,
+                    "cfg_scale": 2.0,  # Use default cfg_scale that the model supports
+                    "min_p": 0.15,
+                    "seed": 42,
+                    "randomize_seed": False,
+                }
+                
+                # Run warm-up generation in thread pool
+                loop = asyncio.get_event_loop()
+                await loop.run_in_executor(
+                    self.executor, 
+                    lambda: self.generate_audio(**warmup_params)
+                )
+                
+                self.model_cache_warmed = True
+                logger.info(f"✅ Model warm-up completed for {model_name}")
+                
+            except Exception as e:
+                logger.warning(f"⚠️ Model warm-up failed for {model_name}: {e}")
+                # Don't fail service startup if warm-up fails
+                pass
+    
+    def _setup_memory_optimizations(self):
+        """Configure memory optimizations - safe for multiprocessing"""        
+        # Set thread affinity for CPU operations (safe for multiprocessing)
+        torch.set_num_threads(min(4, os.cpu_count() or 1))
+        logger.info(f"🔧 PyTorch thread count set to {torch.get_num_threads()}")
+        
+        # Set environment variables that don't require CUDA initialization
+        if self.device.startswith('cuda'):
+            os.environ.update({
+                'PYTORCH_CUDA_ALLOC_CONF': 'max_split_size_mb:512,roundup_power2_divisions:16,garbage_collection_threshold:0.8',
+                'CUDA_LAUNCH_BLOCKING': '0',  # Async CUDA operations
+                'TORCH_CUDNN_V8_API_ENABLED': '1',  # Use cuDNN v8 API
+            })
+            logger.info("🔧 CUDA environment variables configured")
+
+    def _ensure_cuda_initialized(self):
+        """Initialize CUDA settings after worker fork (lazy initialization)"""
+        if not self._cuda_initialized and self.device.startswith('cuda'):
+            try:
+                # Set memory pool size to 85% of GPU memory
+                torch.cuda.set_per_process_memory_fraction(0.85)
+                
+                # Pre-allocate memory pool to avoid fragmentation
+                torch.cuda.empty_cache()
+                # Allocate and free a large tensor to establish memory pool
+                dummy_tensor = torch.zeros(1024, 1024, device=self.device, dtype=torch.float16)
+                del dummy_tensor
+                torch.cuda.empty_cache()
+                
+                self._cuda_initialized = True
+                logger.info("🧠 GPU memory pool initialized and optimized")
+            except Exception as e:
+                logger.warning(f"⚠️ CUDA initialization failed: {e}")
+                # Don't mark as initialized if it failed
+                return False
+        return True
+
+    async def start_batch_processor(self):
+        """Start the batch processing task for improved throughput"""
+        if self.batch_processor_task is None:
+            self.batch_processor_task = asyncio.create_task(self._batch_processor())
+            logger.info("📦 Batch processor started for improved throughput")
+
+    async def _batch_processor(self):
+        """Process requests in batches for better GPU utilization"""
+        while True:
+            batch = []
+            
+            try:
+                # Collect requests for batch processing
+                while len(batch) < self.batch_size:
+                    try:
+                        request = await asyncio.wait_for(
+                            self.request_queue.get(), 
+                            timeout=self.batch_timeout if batch else None
+                        )
+                        batch.append(request)
+                    except asyncio.TimeoutError:
+                        break  # Process current batch
+                
+                if batch:
+                    logger.debug(f"Processing batch of {len(batch)} requests")
+                    await self._process_batch(batch)
+                    
+            except Exception as e:
+                logger.error(f"Batch processor error: {e}")
+                await asyncio.sleep(0.1)
+
+    async def _process_batch(self, batch):
+        """Process a batch of TTS requests together with true tensor batching"""
+        if not batch:
+            return
+            
+        # Group by model for efficient batching
+        model_batches = {}
+        for request_future, args, kwargs in batch:
+            model_choice = kwargs.get('model_choice', args[0] if args else self.default_model)
+            if model_choice not in model_batches:
+                model_batches[model_choice] = []
+            model_batches[model_choice].append((request_future, args, kwargs))
+        
+        # Process each model batch
+        for model_choice, requests in model_batches.items():
+            try:
+                # Check if model supports batching
+                model_info = self.available_models.get(model_choice, {})
+                if not model_info.get('supports_batch', False):
+                    # Fall back to sequential processing for models that don't support batching
+                    for request_future, args, kwargs in requests:
+                        try:
+                            result = await self.generate_audio_async(*args, **kwargs)
+                            request_future.set_result(result)
+                        except Exception as e:
+                            request_future.set_exception(e)
+                    continue
+                
+                # True batch processing for supported models
+                await self._process_model_batch(model_choice, requests)
+                
+            except Exception as e:
+                # If batch processing fails, fall back to sequential
+                logger.warning(f"Batch processing failed for {model_choice}, falling back to sequential: {e}")
+                for request_future, args, kwargs in requests:
+                    try:
+                        result = await self.generate_audio_async(*args, **kwargs)
+                        request_future.set_result(result)
+                    except Exception as e:
+                        request_future.set_exception(e)
+    
+    async def _process_model_batch(self, model_choice, requests):
+        """Process a batch of requests for a single model with tensor batching"""
+        if len(requests) == 1:
+            # Single request - use normal processing
+            request_future, args, kwargs = requests[0]
+            try:
+                result = await self.generate_audio_async(*args, **kwargs)
+                request_future.set_result(result)
+            except Exception as e:
+                request_future.set_exception(e)
+            return
+        
+        # Multiple requests - use batch processing
+        try:
+            texts = []
+            params_list = []
+            futures = []
+            
+            for request_future, args, kwargs in requests:
+                # Extract text and parameters
+                if args:
+                    text = args[1] if len(args) > 1 else kwargs.get('text', '')
+                else:
+                    text = kwargs.get('text', '')
+                    
+                texts.append(text)
+                params_list.append(kwargs)
+                futures.append(request_future)
+            
+            # Run batch generation in thread pool
+            loop = asyncio.get_event_loop()
+            results = await loop.run_in_executor(
+                self.executor,
+                lambda: self._generate_audio_batch(model_choice, texts, params_list[0])  # Use first params as template
+            )
+            
+            # Return results to futures
+            for future, result in zip(futures, results):
+                future.set_result(result)
+                
+        except Exception as e:
+            # If batch fails, set error for all requests
+            for request_future, _, _ in requests:
+                request_future.set_exception(e)
 
     def _load_single_model(self, model_name: str):
         """Load a single model with all optimizations"""
@@ -160,7 +387,25 @@ class TTSService:
         
         model_info = self.available_models[model_name]
         if model_info["status"] != "available":
-            raise ValueError(f"Model {model_name} is not available: {model_info['status']}")
+            error_msg = f"Model {model_name} is not available: {model_info['status']}"
+            if "error" in model_info:
+                error_msg += f" - {model_info['error']}"
+            raise ValueError(error_msg)
+        
+        # Ensure CUDA is properly initialized after worker fork
+        self._ensure_cuda_initialized()
+        
+        # Apply CUDA-specific optimizations before model loading
+        if self.device.startswith('cuda'):
+            # Enable cuDNN benchmark mode for fixed input sizes - 15-25% speedup
+            torch.backends.cudnn.benchmark = True
+            torch.backends.cudnn.deterministic = False
+            
+            # Enable TensorFloat-32 for faster matmul on Ampere+ GPUs - 20% speedup
+            torch.backends.cuda.matmul.allow_tf32 = True
+            torch.backends.cudnn.allow_tf32 = True
+            
+            logger.info("🚀 CUDA optimizations enabled: cuDNN benchmark, TF32, memory pooling")
         
         # Load model with standard PyTorch
         load_kwargs = {"device": self.device, "backbone": "torch"}
@@ -168,8 +413,21 @@ class TTSService:
         
         model = Zonos.from_pretrained(model_name, **load_kwargs)
         
-        # Convert model to consistent dtype (before any DeepSpeed wrapper)
-        target_dtype = torch.bfloat16 if torch.cuda.is_bf16_supported() else torch.float16
+        # Apply quantization for faster inference and lower memory usage
+        target_dtype = self._get_optimal_dtype()
+        
+        # Attempt dynamic quantization for CPU or mixed precision for GPU
+        if self.device == 'cpu':
+            try:
+                logger.info(f"🔧 Applying dynamic quantization to {model_name}")
+                model = torch.quantization.quantize_dynamic(
+                    model, {torch.nn.Linear}, dtype=torch.qint8
+                )
+                logger.info(f"✅ Dynamic quantization applied to {model_name}")
+            except Exception as e:
+                logger.warning(f"⚠️ Dynamic quantization failed: {e}")
+        
+        # Convert model to optimal dtype
         model = model.to(dtype=target_dtype)
         
         # Apply DeepSpeed wrapper if available and enabled and supported
@@ -186,11 +444,35 @@ class TTSService:
         else:
             logger.info(f"✅ Successfully loaded {model_name} with standard PyTorch (float16)")
         
+        # Apply torch.compile for JIT optimization (PyTorch 2.0+)
+        if hasattr(torch, 'compile') and self.device.startswith('cuda'):
+            try:
+                logger.info(f"⚡ Applying torch.compile JIT optimization to {model_name}")
+                # Use reduce-overhead mode for inference - 10-30% speedup
+                model = torch.compile(model, mode="reduce-overhead", dynamic=False)
+                logger.info(f"✅ torch.compile optimization applied to {model_name}")
+            except Exception as e:
+                logger.warning(f"⚠️ torch.compile optimization failed for {model_name}: {e}")
+        
         # Set to eval mode for inference
         model.requires_grad_(False).eval()
         logger.debug(f"🔒 Set {model_name} to evaluation mode")
         
         return model
+
+    def _get_optimal_dtype(self):
+        """Determine optimal data type for the current hardware"""
+        if self.device.startswith('cuda'):
+            # Use bfloat16 on modern GPUs (Ampere+), float16 elsewhere
+            if torch.cuda.is_bf16_supported():
+                logger.debug("Using bfloat16 for optimal performance on modern GPU")
+                return torch.bfloat16
+            else:
+                logger.debug("Using float16 for compatibility")
+                return torch.float16
+        else:
+            # Use float32 on CPU for better accuracy
+            return torch.float32
 
     def _ensure_model_loaded(self, model_choice: str):
         """Ensure the requested model is loaded, unloading others if necessary"""
@@ -203,22 +485,35 @@ class TTSService:
             return self.current_model
         
         # Unload current model if different model requested
-        if self.current_model is not None and self.current_model_name != actual_model_name:
+        if hasattr(self, 'current_model') and self.current_model is not None and self.current_model_name != actual_model_name:
             logger.info(f"🔄 Switching from {self.current_model_name} to {actual_model_name}")
             logger.info(f"📤 Unloading {self.current_model_name}")
             del self.current_model
             torch.cuda.empty_cache()  # Free GPU memory
+            self.current_model = None
+            self.current_model_name = None
         
         # Load the requested model
         logger.info(f"📥 Loading requested model: {actual_model_name}")
-        self.current_model = self._load_single_model(actual_model_name)
-        self.current_model_name = actual_model_name
+        try:
+            self.current_model = self._load_single_model(actual_model_name)
+            self.current_model_name = actual_model_name
+        except Exception as e:
+            # Ensure attributes exist even if loading fails
+            self.current_model = None
+            self.current_model_name = None
+            raise e
         
         return self.current_model
 
     def _wrap_with_deepspeed(self, model, model_name: str):
         """Apply DeepSpeed optimization wrapper to model"""
-        import deepspeed
+        # Import DeepSpeed here to avoid CUDA initialization during module import
+        try:
+            import deepspeed
+        except Exception as e:
+            logger.error(f"Failed to import DeepSpeed: {e}")
+            raise
         
         # Simple DeepSpeed inference optimization (based on langfod commit)
         try:
@@ -447,6 +742,218 @@ class TTSService:
         
         logger.info("Audio generation complete")
         return (sr_out, wav_out.squeeze().numpy()), seed
+
+    def _generate_audio_batch(self, model_choice: str, texts: List[str], base_params: dict):
+        """
+        Generate audio for multiple texts in a single batch.
+        Based on Zonos PR #192 batch processing implementation.
+        """
+        logger.info(f"Batch generating audio for {len(texts)} texts using model: {model_choice}")
+        
+        # Ensure the requested model is loaded
+        selected_model = self._ensure_model_loaded(model_choice)
+        actual_model_name = self.current_model_name
+        
+        # Extract parameters from base_params
+        language = base_params.get('language', 'en-us')
+        emotion_values = base_params.get('emotion_values', [1.0, 0.05, 0.05, 0.05, 0.05, 0.05, 0.1, 0.2])
+        vq_score = base_params.get('vq_score', 0.78)
+        speaking_rate = base_params.get('speaking_rate', 15.0)
+        cfg_scale = base_params.get('cfg_scale', 2.0)
+        min_p = base_params.get('min_p', 0.15)
+        seed = base_params.get('seed', 420)
+        randomize_seed = base_params.get('randomize_seed', True)
+        speaker_audio = base_params.get('speaker_audio', None)
+        unconditional_keys = base_params.get('unconditional_keys', ["emotion"])
+        
+        # Normalize language code
+        normalized_language = normalize_language_code(language)
+        
+        if randomize_seed:
+            seed = torch.randint(0, 2**32 - 1, (1,)).item()
+        torch.manual_seed(seed)
+        
+        # Process speaker audio if provided (same for all texts in batch)
+        speaker_embedding = None
+        if speaker_audio is not None and "speaker" not in unconditional_keys:
+            logger.info(f"Processing speaker audio for batch: {speaker_audio}")
+            wav, sr = torchaudio.load(speaker_audio)
+            speaker_embedding = selected_model.make_speaker_embedding(wav, sr)
+            target_dtype = self._get_optimal_dtype()
+            speaker_embedding = speaker_embedding.to(self.device, dtype=target_dtype)
+        
+        # Determine model's working dtype
+        working_dtype = self._get_optimal_dtype()
+        
+        # Prepare batch conditioning
+        logger.info("Creating batch conditioning dictionary")
+        batch_conditioning = []
+        
+        for text in texts:
+            # Prepare emotion and VQ tensors for this text
+            emotion_tensor = torch.tensor(emotion_values, device=self.device, dtype=working_dtype)
+            vq_tensor = torch.tensor([vq_score] * 8, device=self.device, dtype=working_dtype).unsqueeze(0)
+            
+            # Create conditioning dictionary for this text
+            cond_dict = make_cond_dict(
+                text=text,
+                language=normalized_language,
+                speaker=speaker_embedding,
+                emotion=emotion_tensor,
+                vqscore_8=vq_tensor,
+                fmax=24000.0,
+                pitch_std=45.0,
+                speaking_rate=float(speaking_rate),
+                dnsmos_ovrl=4.0,
+                speaker_noised=False,
+                device=self.device,
+                unconditional_keys=unconditional_keys,
+            )
+            conditioning = selected_model.prepare_conditioning(cond_dict)
+            batch_conditioning.append(conditioning)
+        
+        # Batch generation parameters
+        sampling_params = {
+            "top_p": 0.95,
+            "top_k": 50,
+            "min_p": float(min_p),
+            "linear": 1.0,
+            "conf": 0.1,
+            "quad": 1.0
+        }
+        
+        # Generate audio for batch
+        logger.info(f"Generating batch audio for {len(texts)} texts")
+        max_new_tokens = 86 * 60  # ~30 seconds of audio per text
+        
+        try:
+            # Batch generation - process all texts together
+            batch_codes = []
+            for i, conditioning in enumerate(batch_conditioning):
+                logger.debug(f"Generating for text {i+1}/{len(texts)}")
+                
+                generation_kwargs = {
+                    "prefix_conditioning": conditioning,
+                    "audio_prefix_codes": None,  # Not supported in batch mode yet
+                    "max_new_tokens": max_new_tokens,
+                    "cfg_scale": float(cfg_scale),
+                    "batch_size": 1,  # Process one at a time but in optimized manner
+                    "sampling_params": sampling_params,
+                    "disable_torch_compile": True,  # Better for batch processing
+                }
+                
+                codes = selected_model.generate(**generation_kwargs)
+                batch_codes.append(codes)
+            
+            # Decode all generated codes to waveforms
+            logger.info("Decoding batch generated audio to waveforms")
+            results = []
+            
+            for i, codes in enumerate(batch_codes):
+                # Check for empty generation
+                if hasattr(codes, 'shape') and len(codes.shape) >= 3 and codes.shape[2] == 0:
+                    logger.warning(f"Empty audio codes generated for text {i+1}, retrying")
+                    # Regenerate this specific text
+                    codes = selected_model.generate(**generation_kwargs)
+                
+                # Decode to waveform
+                wav_out = selected_model.autoencoder.decode(codes).cpu().detach()
+                sr_out = selected_model.autoencoder.sampling_rate
+                
+                if wav_out.dim() == 2 and wav_out.size(0) > 1:
+                    wav_out = wav_out[0:1, :]
+                
+                # Apply post-processing
+                wav_out = self._post_process_audio(wav_out, sr_out)
+                
+                results.append(((sr_out, wav_out.squeeze().numpy()), seed))
+            
+            logger.info(f"Batch audio generation complete for {len(texts)} texts")
+            return results
+            
+        except Exception as e:
+            logger.error(f"Batch generation failed: {e}")
+            # Fall back to individual generation
+            results = []
+            for text in texts:
+                try:
+                    result = self.generate_audio(
+                        model_choice=model_choice,
+                        text=text,
+                        **base_params
+                    )
+                    results.append(result)
+                except Exception as text_error:
+                    logger.error(f"Failed to generate audio for text '{text[:50]}...': {text_error}")
+                    # Return empty audio as fallback
+                    sr_fallback = 22050
+                    audio_fallback = torch.zeros(1, int(sr_fallback * 0.1))  # 0.1s of silence
+                    results.append(((sr_fallback, audio_fallback.numpy()), seed))
+            
+            return results
+
+    async def generate_audio_async(
+        self,
+        model_choice: str,
+        text: str,
+        language: str = "en-us",
+        speaker_audio: Optional[str] = None,
+        prefix_audio: Optional[str] = None,
+        emotion_values: List[float] = [1.0, 0.05, 0.05, 0.05, 0.05, 0.05, 0.1, 0.2],
+        vq_score: float = 0.78,
+        fmax: float = 24000,
+        pitch_std: float = 45.0,
+        speaking_rate: float = 15.0,
+        dnsmos_ovrl: float = 4.0,
+        speaker_noised: bool = False,
+        cfg_scale: float = 2.0,
+        min_p: float = 0.15,
+        seed: int = 420,
+        randomize_seed: bool = True,
+        unconditional_keys: List[str] = ["emotion"],
+        top_p: float = 0.95,
+        top_k: int = 50,
+        linear: float = 1.0,
+        confidence: float = 0.1,
+        quadratic: float = 1.0,
+        disable_torch_compile: bool = True,
+    ) -> Tuple[Tuple[int, np.ndarray], int]:
+        """
+        Async version of generate_audio that runs in thread pool executor.
+        This allows the FastAPI server to handle other requests while audio generation runs.
+        """
+        logger.debug(f"Running async audio generation for model: {model_choice}")
+        
+        # Run the synchronous generate_audio in thread pool
+        loop = asyncio.get_event_loop()
+        return await loop.run_in_executor(
+            self.executor,
+            lambda: self.generate_audio(
+                model_choice=model_choice,
+                text=text,
+                language=language,
+                speaker_audio=speaker_audio,
+                prefix_audio=prefix_audio,
+                emotion_values=emotion_values,
+                vq_score=vq_score,
+                fmax=fmax,
+                pitch_std=pitch_std,
+                speaking_rate=speaking_rate,
+                dnsmos_ovrl=dnsmos_ovrl,
+                speaker_noised=speaker_noised,
+                cfg_scale=cfg_scale,
+                min_p=min_p,
+                seed=seed,
+                randomize_seed=randomize_seed,
+                unconditional_keys=unconditional_keys,
+                top_p=top_p,
+                top_k=top_k,
+                linear=linear,
+                confidence=confidence,
+                quadratic=quadratic,
+                disable_torch_compile=disable_torch_compile,
+            )
+        )
 
     def _post_process_audio(self, audio: torch.Tensor, sr: int) -> torch.Tensor:
         """

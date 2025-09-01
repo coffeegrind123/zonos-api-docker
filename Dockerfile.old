@@ -1,5 +1,4 @@
-# Multi-stage build for optimal performance and size
-FROM pytorch/pytorch:2.5.1-cuda12.4-cudnn9-devel as builder
+FROM pytorch/pytorch:2.5.1-cuda12.4-cudnn9-devel
 
 LABEL org.opencontainers.image.source=https://github.com/manascb1344/zonos-api
 LABEL org.opencontainers.image.description="Zonos API with GPU support"
@@ -8,7 +7,7 @@ LABEL org.opencontainers.image.licenses=MIT
 # Set Zonos working directory
 WORKDIR /app/zonos
 
-# System packages for compilation
+# System packages
 RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
     --mount=type=cache,target=/var/lib/apt,sharing=locked \
     apt-get update && DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
@@ -16,7 +15,6 @@ RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
     libsndfile1 \
     git \
     espeak-ng \
-    build-essential \
     && apt-get clean \
     && rm -rf /var/lib/apt/lists/*
 
@@ -28,8 +26,9 @@ RUN --mount=type=cache,target=/root/.cache/pip \
 RUN git clone --depth 1 https://github.com/Zyphra/Zonos.git . \
     && git submodule update --init --recursive
 
-# Copy dependency specs
+# Copy dependency specs and application code
 COPY requirements.txt pyproject.toml ./
+COPY app/ app/
 
 # Upgrade PyTorch to cu121 and remove flash-attn to fix compatibility issues
 RUN --mount=type=cache,target=/root/.cache/pip \
@@ -39,9 +38,9 @@ RUN --mount=type=cache,target=/root/.cache/pip \
 # Remove any existing flash-attn installations
 RUN pip3 uninstall -y flash-attn flash_attn || true
 
-# Install basic Python dependencies with hybrid model support
+# Install basic Python dependencies
 RUN --mount=type=cache,target=/root/.cache/pip \
-    uv pip install --system -r requirements.txt -e .[compile]
+    uv pip install --system -r requirements.txt -e .
 
 # Install DeepSpeed for optional acceleration
 RUN --mount=type=cache,target=/root/.cache/pip \
@@ -70,49 +69,27 @@ RUN --mount=type=cache,target=/root/.cache/pip \
     sudachipy>=0.6.10 \
     && rm -rf /root/.cache/pip/*
 
-# Final runtime stage - use devel for nvcc access
-FROM pytorch/pytorch:2.5.1-cuda12.4-cudnn9-devel
-
-# Install runtime dependencies that are needed
-RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
-    --mount=type=cache,target=/var/lib/apt,sharing=locked \
-    apt-get update && DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
-    ffmpeg \
-    libsndfile1 \
-    espeak-ng \
-    && apt-get clean \
-    && rm -rf /var/lib/apt/lists/*
-
-# Copy compiled packages and dependencies from builder
-COPY --from=builder /opt/conda /opt/conda
-
-# Set Zonos working directory
-WORKDIR /app/zonos
-
-# Copy the built Zonos repository
-COPY --from=builder /app/zonos /app/zonos
-
-# Copy application code
+# Copy application code last
 COPY app/ app/
 
-# Environment variables - Performance optimized with CUDA_HOME
+# Environment variables - Performance optimized
 ENV PYTHONPATH=/app:/app/zonos \
     USE_GPU=true \
     PYTHONUNBUFFERED=1 \
-    ENABLE_DEEPSPEED=true \
+    ENABLE_DEEPSPEED=false \
     TRITON_CACHE_DIR=/app/triton_cache \
     TRITON_DISABLE_LINE_INFO=1 \
     PYTORCH_CUDA_ALLOC_CONF=max_split_size_mb:512,roundup_power2_divisions:16,garbage_collection_threshold:0.8 \
     CUDA_LAUNCH_BLOCKING=0 \
     TORCH_CUDNN_V8_API_ENABLED=1 \
     OMP_NUM_THREADS=4 \
-    MKL_NUM_THREADS=4 \
-    CUDA_HOME=/usr/local/cuda
+    MKL_NUM_THREADS=4
 
 # Create Triton cache directory to avoid warnings
 RUN mkdir -p /root/.triton/autotune /app/triton_cache && \
     chmod 755 /root/.triton /root/.triton/autotune /app/triton_cache
 
-# Run the application with uvicorn directly to avoid multiprocessing issues
-CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000", \
-     "--workers", "1", "--loop", "asyncio", "--access-log"]
+# Run the application with performance optimizations
+CMD ["gunicorn", "app.main:app", "-w", "1", "-k", "uvicorn.workers.UvicornWorker", \
+     "--bind", "0.0.0.0:8000", "--worker-connections", "100", \
+     "--max-requests", "1000", "--preload", "--access-logfile", "-"]
